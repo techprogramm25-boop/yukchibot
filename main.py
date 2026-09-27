@@ -487,12 +487,12 @@ async def security_group_guard(message: types.Message):
             pass
 
 
-# ================= COMMON ADMIN HANDLERS (Reklama va Boshqaruv) =================
+# ================= COMMON ADMIN HANDLERS (Har ikkala bot uchun) =================
 async def handle_broadcast_start(call: types.CallbackQuery, state: FSMContext):
     await call.answer()
     if call.from_user.id not in ADMINS: 
         return
-    await call.message.answer("📢 **Reklama yuborish uchun matn, rasm yoki video yuboring:**\n\n*(Siz yuborgan xabar barcha guruhlarga va botimizdan foydalanayotgan barcha foydalanuvchilarga avtomatik tarqatiladi)*")
+    await call.message.answer("📢 <b>Reklama matnini, rasm yoki videoni yuboring:</b>\n\n*(Siz yuborgan xabar guruhlarga va barcha foydalanuvchilarga tarqatiladi)*")
     await state.set_state(AdminState.waiting_for_broadcast)
 
 async def handle_broadcast_process(message: types.Message, state: FSMContext, bot_inst: Bot):
@@ -500,7 +500,6 @@ async def handle_broadcast_process(message: types.Message, state: FSMContext, bo
         return
     
     sent_count = 0
-    # Guruhlarga tarqatish
     for g in TARGET_GROUPS:
         try: 
             await message.copy_to(chat_id=g)
@@ -508,7 +507,6 @@ async def handle_broadcast_process(message: types.Message, state: FSMContext, bo
         except: 
             pass
             
-    # Barcha foydalanuvchilarga tarqatish
     for uid in user_stats.keys():
         if isinstance(uid, int):
             try:
@@ -517,7 +515,7 @@ async def handle_broadcast_process(message: types.Message, state: FSMContext, bo
             except:
                 pass
 
-    await message.answer(f"✅ Reklama muvaffaqiyatli tarqatildi! (Jami jo'natmalar: {sent_count} ta)")
+    await message.answer(f"✅ Reklama muvaffaqiyatli tarqatildi! (Jami: {sent_count} ta)")
     await state.clear()
 
 async def handle_ban_start(call: types.CallbackQuery, state: FSMContext):
@@ -561,7 +559,7 @@ async def handle_unban_process(message: types.Message, state: FSMContext):
     await message.answer(f"✅ {target} bandan chiqarildi!")
     await state.clear()
 
-# Admin handlerlarni ikkala botga ham to'liq ulash
+# Admin handlerlarni ikkala botga ham to'g'ridan-to'g'ri ulash
 for dp_inst, b_inst in [(dp1, bot1), (dp2, bot2)]:
     @dp_inst.callback_query(F.data == "admin_broadcast")
     async def bc_s(c: types.CallbackQuery, s: FSMContext): 
