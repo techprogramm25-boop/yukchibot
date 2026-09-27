@@ -345,7 +345,7 @@ async def finalize_and_send_load(message: types.Message, state: FSMContext, data
         f"_____________________\n"
         f"👤 <b>Kurator:</b> {curator_info['name']} (@{user.username or 'yoq'})\n"
         f"📢 <b>Kanallar:</b> @YukchiForwarder\n\n"
-        f"💡 <i>Eslatma: Yukni qabul qilish uchun pastdagi tugmani bosing.</i>"
+        f"💡 <i>Eslatma: Yukni olish uchun pastdagi 'Qabul qilish' tugmasini bosing.</i>"
     )
     
     expire_time = datetime.now() + timedelta(days=data.get("load_days", 1))
@@ -371,7 +371,6 @@ async def finalize_and_send_load(message: types.Message, state: FSMContext, data
     save_json(LOADS_FILE, active_loads)
     await message.answer("✅ Yuk guruhlarga va adminga yuborildi!")
 
-    # Adminga yuk e'loni haqida xabar yuborish
     for admin_id in ADMINS:
         try:
             await bot1.send_message(chat_id=admin_id, text=f"🔔 <b>Yangi yuk e'lon qilindi!</b>\n\n{final_caption}")
@@ -385,7 +384,6 @@ async def finalize_and_send_load(message: types.Message, state: FSMContext, data
 
 @dp1.callback_query(F.data.startswith("show_curator_phone:"))
 async def show_curator_phone(call: types.CallbackQuery):
-    await call.answer()
     try:
         curator_id = int(call.data.split(":")[1])
         curator = curators_db.get(curator_id, {"phone": "Mavjud emas"})
@@ -395,7 +393,6 @@ async def show_curator_phone(call: types.CallbackQuery):
 
 @dp1.callback_query(F.data.startswith("accept_load:"))
 async def accept_load_handler(call: types.CallbackQuery):
-    await call.answer()
     try:
         driver = drivers_db.get(call.from_user.id)
         if not driver:
@@ -600,7 +597,7 @@ async def lst_cur2(c: types.CallbackQuery):
     await c.message.answer(f"📦 Kuratorlar ro'yxati:\n{txt}")
 
 
-# ================= FASTAPI & WEBHOOK SETUP =================
+# ================= FASTAPI & UNIFIED WEBHOOK SETUP =================
 @app.on_event("startup")
 async def startup_event():
     asyncio.create_task(background_load_cleaner())
@@ -629,20 +626,19 @@ async def background_load_cleaner():
                             pass
             save_json(LOADS_FILE, active_loads)
 
-@app.post(f"/webhook/bot1/{API_TOKEN_1}")
-async def webhook_bot1(request: Request):
+# Barcha webhooklar uchun yagona umumiy qabul qiluvchi endpoint
+@app.post("/webhook/{token}")
+async def unified_webhook(token: str, request: Request):
     try:
-        update = Update.model_validate(await request.json(), context={"bot": bot1})
-        await dp1.feed_update(bot1, update)
-        return {"status": "ok"}
-    except Exception as e:
-        return {"status": "error", "message": str(e)}
-
-@app.post(f"/webhook/bot2/{API_TOKEN_2}")
-async def webhook_bot2(request: Request):
-    try:
-        update = Update.model_validate(await request.json(), context={"bot": bot2})
-        await dp2.feed_update(bot2, update)
+        data = await request.json()
+        if token == API_TOKEN_1:
+            update = Update.model_validate(data, context={"bot": bot1})
+            await dp1.feed_update(bot1, update)
+        elif token == API_TOKEN_2:
+            update = Update.model_validate(data, context={"bot": bot2})
+            await dp2.feed_update(bot2, update)
+        else:
+            return {"status": "error", "message": "Invalid token"}
         return {"status": "ok"}
     except Exception as e:
         return {"status": "error", "message": str(e)}
@@ -650,14 +646,14 @@ async def webhook_bot2(request: Request):
 @app.get("/")
 async def root(request: Request):
     base_url = str(request.base_url).rstrip("/")
-    url1 = f"{base_url}/webhook/bot1/{API_TOKEN_1}"
-    url2 = f"{base_url}/webhook/bot2/{API_TOKEN_2}"
+    url1 = f"{base_url}/webhook/{API_TOKEN_1}"
+    url2 = f"{base_url}/webhook/{API_TOKEN_2}"
     
     await bot1.set_webhook(url1)
     await bot2.set_webhook(url2)
     
     return {
-        "status": "Barcha botlar va webhooklar muvaffaqiyatli ulandi!",
+        "status": "Ikkala bot webhooklari muvaffaqiyatli ulandi!",
         "bot1_webhook": url1,
         "bot2_webhook": url2
     }
