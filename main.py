@@ -487,18 +487,17 @@ async def security_group_guard(message: types.Message):
             pass
 
 
-# ================= COMMON ADMIN HANDLERS (Har ikkala bot uchun) =================
+# ================= COMMON ADMIN HANDLERS =================
 async def handle_broadcast_start(call: types.CallbackQuery, state: FSMContext):
     await call.answer()
     if call.from_user.id not in ADMINS: 
         return
-    await call.message.answer("📢 <b>Reklama matnini, rasm yoki videoni yuboring:</b>\n\n*(Siz yuborgan xabar guruhlarga va barcha foydalanuvchilarga tarqatiladi)*")
+    await call.message.answer("📢 <b>Reklama matnini, rasm yoki videoni yuboring:</b>")
     await state.set_state(AdminState.waiting_for_broadcast)
 
 async def handle_broadcast_process(message: types.Message, state: FSMContext, bot_inst: Bot):
     if message.from_user.id not in ADMINS: 
         return
-    
     sent_count = 0
     for g in TARGET_GROUPS:
         try: 
@@ -506,7 +505,6 @@ async def handle_broadcast_process(message: types.Message, state: FSMContext, bo
             sent_count += 1
         except: 
             pass
-            
     for uid in user_stats.keys():
         if isinstance(uid, int):
             try:
@@ -514,7 +512,6 @@ async def handle_broadcast_process(message: types.Message, state: FSMContext, bo
                 sent_count += 1
             except:
                 pass
-
     await message.answer(f"✅ Reklama muvaffaqiyatli tarqatildi! (Jami: {sent_count} ta)")
     await state.clear()
 
@@ -559,7 +556,6 @@ async def handle_unban_process(message: types.Message, state: FSMContext):
     await message.answer(f"✅ {target} bandan chiqarildi!")
     await state.clear()
 
-# Admin handlerlarni ikkala botga ham to'g'ridan-to'g'ri ulash
 for dp_inst, b_inst in [(dp1, bot1), (dp2, bot2)]:
     @dp_inst.callback_query(F.data == "admin_broadcast")
     async def bc_s(c: types.CallbackQuery, s: FSMContext): 
@@ -605,7 +601,7 @@ async def lst_cur2(c: types.CallbackQuery):
     await c.message.answer(f"📦 Kuratorlar ro'yxati:\n{txt}")
 
 
-# ================= FASTAPI & UNIFIED WEBHOOK SETUP =================
+# ================= FASTAPI & WEBHOOK SETUP (DELETE & RE-SET) =================
 @app.on_event("startup")
 async def startup_event():
     asyncio.create_task(background_load_cleaner())
@@ -656,11 +652,16 @@ async def root(request: Request):
     url1 = f"{base_url}/webhook/{API_TOKEN_1}"
     url2 = f"{base_url}/webhook/{API_TOKEN_2}"
     
+    # Oldingi webhook'larni o'chirib, yangidan toza qilib ulaymiz (delete_webhook)
+    await bot1.delete_webhook(drop_pending_updates=True)
+    await bot2.delete_webhook(drop_pending_updates=True)
+    
+    # Yangi webhooklarni o'rnatish
     await bot1.set_webhook(url1)
     await bot2.set_webhook(url2)
     
     return {
-        "status": "Ikkala bot webhooklari muvaffaqiyatli ulandi!",
+        "status": "Eski webhooklar o'chirilib, yangilari muvaffaqiyatli ulandi!",
         "bot1_webhook": url1,
         "bot2_webhook": url2
     }
