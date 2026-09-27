@@ -20,7 +20,7 @@ ADMINS = [6977836294, 8409259397]
 
 REQUIRED_CHANNELS = ["@YukchiForwarder", "@YukchiForwarderPeople"]
 TARGET_GROUPS = [-1003968416767, -1003775919755]
-SUPPORT_SITE_URL = "https://yusufxonpro.uz" 
+SUPPORT_SITE_URL = "https://vercell-flax.vercel.app/" # Yangi support sayt manzili
 ELONCHI_BOT_USERNAME = "YukchiForwarder_Bot"
 
 logging.basicConfig(level=logging.INFO)
@@ -352,7 +352,7 @@ async def finalize_and_send_load(message: types.Message, state: FSMContext, data
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="📞 Nomer ko'rish", callback_data=f"show_curator_phone:{user.id}")],
         [InlineKeyboardButton(text="🚛 Qabul qilish", callback_data=f"accept_load:{load_id}")],
-        [InlineKeyboardButton(text="🌐 Support", url=SUPPORT_SITE_URL)]
+        [InlineKeyboardButton(text="🌐 Support Sayt", url=SUPPORT_SITE_URL)]
     ])
     
     group_msg_ids = {}
@@ -626,7 +626,6 @@ async def background_load_cleaner():
                             pass
             save_json(LOADS_FILE, active_loads)
 
-# Barcha webhooklar uchun yagona umumiy qabul qiluvchi endpoint
 @app.post("/webhook/{token}")
 async def unified_webhook(token: str, request: Request):
     try:
