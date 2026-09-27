@@ -20,7 +20,7 @@ ADMINS = [6977836294, 8409259397]
 
 REQUIRED_CHANNELS = ["@YukchiForwarder", "@YukchiForwarderPeople"]
 TARGET_GROUPS = [-1003968416767, -1003775919755]
-SUPPORT_SITE_URL = "https://vercell-flax.vercel.app/" # Yangi support sayt manzili
+SUPPORT_SITE_URL = "https://vercell-flax.vercel.app/" 
 ELONCHI_BOT_USERNAME = "YukchiForwarder_Bot"
 
 logging.basicConfig(level=logging.INFO)
@@ -384,6 +384,7 @@ async def finalize_and_send_load(message: types.Message, state: FSMContext, data
 
 @dp1.callback_query(F.data.startswith("show_curator_phone:"))
 async def show_curator_phone(call: types.CallbackQuery):
+    await call.answer()
     try:
         curator_id = int(call.data.split(":")[1])
         curator = curators_db.get(curator_id, {"phone": "Mavjud emas"})
@@ -393,6 +394,7 @@ async def show_curator_phone(call: types.CallbackQuery):
 
 @dp1.callback_query(F.data.startswith("accept_load:"))
 async def accept_load_handler(call: types.CallbackQuery):
+    await call.answer()
     try:
         driver = drivers_db.get(call.from_user.id)
         if not driver:
@@ -485,29 +487,37 @@ async def security_group_guard(message: types.Message):
             pass
 
 
-# ================= COMMON ADMIN HANDLERS =================
+# ================= COMMON ADMIN HANDLERS (Reklama va Boshqaruv) =================
 async def handle_broadcast_start(call: types.CallbackQuery, state: FSMContext):
     await call.answer()
     if call.from_user.id not in ADMINS: 
         return
-    await call.message.answer("📢 Reklama matnini (yoki rasm/videoni) yuboring:")
+    await call.message.answer("📢 **Reklama yuborish uchun matn, rasm yoki video yuboring:**\n\n*(Siz yuborgan xabar barcha guruhlarga va botimizdan foydalanayotgan barcha foydalanuvchilarga avtomatik tarqatiladi)*")
     await state.set_state(AdminState.waiting_for_broadcast)
 
 async def handle_broadcast_process(message: types.Message, state: FSMContext, bot_inst: Bot):
     if message.from_user.id not in ADMINS: 
         return
+    
+    sent_count = 0
+    # Guruhlarga tarqatish
     for g in TARGET_GROUPS:
         try: 
             await message.copy_to(chat_id=g)
+            sent_count += 1
         except: 
             pass
+            
+    # Barcha foydalanuvchilarga tarqatish
     for uid in user_stats.keys():
         if isinstance(uid, int):
             try:
                 await message.copy_to(chat_id=uid)
+                sent_count += 1
             except:
                 pass
-    await message.answer("✅ Reklama barchaga tarqatildi!")
+
+    await message.answer(f"✅ Reklama muvaffaqiyatli tarqatildi! (Jami jo'natmalar: {sent_count} ta)")
     await state.clear()
 
 async def handle_ban_start(call: types.CallbackQuery, state: FSMContext):
@@ -551,7 +561,7 @@ async def handle_unban_process(message: types.Message, state: FSMContext):
     await message.answer(f"✅ {target} bandan chiqarildi!")
     await state.clear()
 
-# Admin handlerlarni ikkala botga ham ulash
+# Admin handlerlarni ikkala botga ham to'liq ulash
 for dp_inst, b_inst in [(dp1, bot1), (dp2, bot2)]:
     @dp_inst.callback_query(F.data == "admin_broadcast")
     async def bc_s(c: types.CallbackQuery, s: FSMContext): 
