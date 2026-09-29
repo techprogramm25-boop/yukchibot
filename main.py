@@ -4,7 +4,7 @@ import os
 import logging
 import asyncio
 from datetime import datetime, timedelta
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, BackgroundTasks
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.enums import ChatMemberStatus
 from aiogram.fsm.storage.memory import MemoryStorage
@@ -20,7 +20,7 @@ ADMINS = [6977836294, 8409259397]
 
 REQUIRED_CHANNELS = ["@YukchiForwarder", "@YukchiForwarderPeople"]
 TARGET_GROUPS = [-1003968416767, -1003775919755]
-SUPPORT_SITE_URL = "https://vercell-flax.vercel.app/" 
+SUPPORT_SITE_URL = "https://yukchibot.vercel.app/" 
 ELONCHI_BOT_USERNAME = "YukchiForwarder_Bot"
 
 logging.basicConfig(level=logging.INFO)
@@ -560,7 +560,6 @@ async def handle_unban_process(message: types.Message, state: FSMContext):
     await message.answer(f"✅ {target} bandan chiqarildi!")
     await state.clear()
 
-# Admin handlerlarni har ikkala botga ham ulaymiz
 for dp_inst in [dp1, dp2]:
     @dp_inst.callback_query(F.data == "admin_list_drivers")
     async def ald(c: types.CallbackQuery): await admin_list_drivers_handler(c)
@@ -593,7 +592,6 @@ for dp_inst in [dp1, dp2]:
 # ================= FASTAPI & WEBHOOK SETUP =================
 @app.on_event("startup")
 async def startup_event():
-    # Webhookni har safar rootga kirganda emas, faqat bot ishga tushganda bir marta tozalab qo'yamiz
     try:
         await bot1.delete_webhook(drop_pending_updates=True)
         await bot2.delete_webhook(drop_pending_updates=True)
@@ -625,16 +623,22 @@ async def background_load_cleaner():
                             pass
             save_json(LOADS_FILE, active_loads)
 
+# ENG MUHIM QISM: So'rov kelganda zudlik bilan OK qaytarib, ishlarni fonda bajarish (qotib qolmasligi uchun)
+async def process_update_safely(bot, dp, data):
+    try:
+        update = Update.model_validate(data, context={"bot": bot})
+        await dp.feed_update(bot, update)
+    except Exception as e:
+        logging.error(f"Update xatoligi: {e}")
+
 @app.post("/webhook/{token}")
-async def unified_webhook(token: str, request: Request):
+async def unified_webhook(token: str, request: Request, background_tasks: BackgroundTasks):
     try:
         data = await request.json()
         if token == API_TOKEN_1:
-            update = Update.model_validate(data, context={"bot": bot1})
-            await dp1.feed_update(bot1, update)
+            background_tasks.add_task(process_update_safely, bot1, dp1, data)
         elif token == API_TOKEN_2:
-            update = Update.model_validate(data, context={"bot": bot2})
-            await dp2.feed_update(bot2, update)
+            background_tasks.add_task(process_update_safely, bot2, dp2, data)
         else:
             return {"status": "error", "message": "Invalid token"}
         return {"status": "ok"}
@@ -647,7 +651,6 @@ async def root(request: Request):
     url1 = f"{base_url}/webhook/{API_TOKEN_1}"
     url2 = f"{base_url}/webhook/{API_TOKEN_2}"
     
-    # Webhooklarni avtomatik ulab qo'yish
     try:
         await bot1.set_webhook(url1)
         await bot2.set_webhook(url2)
