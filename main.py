@@ -89,7 +89,6 @@ class ComplaintState(StatesGroup):
 LINK_REGEX = r'(https?://[^\s]+|t\.me/[^\s]+|@[a-zA-Z0-9_]+)'
 SPAM_WORDS = ["kanalga", "gruppaga", "o'ting", "oting", "murojaat", "arzon", "aksiya", "reklama", "lichkaga", "manga oting", "http", "t.me"]
 
-# Yangilangan va to'liq ishlaydigan Admin Klaviaturasi
 def get_admin_keyboard():
     return InlineKeyboardMarkup(inline_keyboard=[
         [
@@ -259,7 +258,7 @@ async def load_from_handler(message: types.Message, state: FSMContext):
 @dp1.message(UserRoleState.load_to, F.text)
 async def load_to_handler(message: types.Message, state: FSMContext):
     await state.update_data(load_to=message.text.strip())
-    await message.answer("⚖️️ Mashina turi va yuk vazni qancha?")
+    await message.answer("⚖ Mashina turi va yuk vazni qancha?")
     await state.set_state(UserRoleState.load_weight)
 
 @dp1.message(UserRoleState.load_weight, F.text)
@@ -413,7 +412,7 @@ async def start_cmd_bot2(message: types.Message, state: FSMContext):
     await track_user_activity(message.from_user, "@YukchiForwarderorg_Bot")
 
     if user_id in banned_users:
-        await message.answer("⛔️ Siz bloklangansiz!")
+        await message.answer("⛔️️ Siz bloklangansiz!")
         return
     is_admin = user_id in ADMINS
     if is_admin:
@@ -467,7 +466,7 @@ async def security_group_guard(message: types.Message):
             pass
 
 
-# ================= ADMIN ACTIONS & HANDLERS (Hamma botlar uchun ishlaydi) =================
+# ================= ADMIN ACTIONS & HANDLERS =================
 async def admin_list_drivers_handler(call: types.CallbackQuery):
     await call.answer()
     if call.from_user.id not in ADMINS: return
@@ -561,34 +560,34 @@ async def handle_unban_process(message: types.Message, state: FSMContext):
     await message.answer(f"✅ {target} bandan chiqarildi!")
     await state.clear()
 
-# Admin handlerlarni har ikkala botga ham ulaymiz
+# MUHIM TUZATISH: Admin handlerlarni har ikkala bot uchun alohida to'g'ri ulash
 for dp_inst in [dp1, dp2]:
     @dp_inst.callback_query(F.data == "admin_list_drivers")
-    async def ald(c: types.CallbackQuery): await admin_list_drivers_handler(c)
+    async def ald_handler(c: types.CallbackQuery): await admin_list_drivers_handler(c)
     
     @dp_inst.callback_query(F.data == "admin_list_curators")
-    async def alc(c: types.CallbackQuery): await admin_list_curators_handler(c)
+    async def alc_handler(c: types.CallbackQuery): await admin_list_curators_handler(c)
     
     @dp_inst.callback_query(F.data == "admin_stats")
-    async def als(c: types.CallbackQuery): await admin_stats_handler(c)
+    async def als_handler(c: types.CallbackQuery): await admin_stats_handler(c)
     
     @dp_inst.callback_query(F.data == "admin_broadcast")
-    async def bc_s(c: types.CallbackQuery, s: FSMContext): await handle_broadcast_start(c, s)
+    async def bc_s_handler(c: types.CallbackQuery, s: FSMContext): await handle_broadcast_start(c, s)
     
     @dp_inst.message(AdminState.waiting_for_broadcast)
-    async def bc_p(m: types.Message, s: FSMContext): await handle_broadcast_process(m, s)
+    async def bc_p_handler(m: types.Message, s: FSMContext): await handle_broadcast_process(m, s)
     
     @dp_inst.callback_query(F.data == "admin_ban_user")
-    async def bn_s(c: types.CallbackQuery, s: FSMContext): await handle_ban_start(c, s)
+    async def bn_s_handler(c: types.CallbackQuery, s: FSMContext): await handle_ban_start(c, s)
     
     @dp_inst.message(AdminState.waiting_for_ban_target, F.text)
-    async def bn_p(m: types.Message, s: FSMContext): await handle_ban_process(m, s)
+    async def bn_p_handler(m: types.Message, s: FSMContext): await handle_ban_process(m, s)
     
     @dp_inst.callback_query(F.data == "admin_unban_user")
-    async def ubn_s(c: types.CallbackQuery, s: FSMContext): await handle_unban_start(c, s)
+    async def ubn_s_handler(c: types.CallbackQuery, s: FSMContext): await handle_unban_start(c, s)
     
     @dp_inst.message(AdminState.waiting_for_unban_target, F.text)
-    async def ubn_p(m: types.Message, s: FSMContext): await handle_unban_process(m, s)
+    async def ubn_p_handler(m: types.Message, s: FSMContext): await handle_unban_process(m, s)
 
 
 # ================= FASTAPI & WEBHOOK SETUP =================
@@ -628,7 +627,9 @@ async def unified_webhook(token: str, request: Request):
             update = Update.model_validate(data, context={"bot": bot1})
             await dp1.feed_update(bot1, update)
         elif token == API_TOKEN_2:
-            update = Update.model_validate(data, context={"bot": bot2})
+            update = Update.model_validate(data, context={"bot": update_context := data}) # aiogram update parsing
+            # aiogram v3 uchun to'g'ri update validatsiyasi
+            update = Update.model_validate(data)
             await dp2.feed_update(bot2, update)
         else:
             return {"status": "error", "message": "Invalid token"}
@@ -642,7 +643,6 @@ async def root(request: Request):
     url1 = f"{base_url}/webhook/{API_TOKEN_1}"
     url2 = f"{base_url}/webhook/{API_TOKEN_2}"
     
-    # Har safar sahifa ochilganda eski webhook o'chib, yangisi avtomatik ulanadi
     await bot1.delete_webhook(drop_pending_updates=True)
     await bot2.delete_webhook(drop_pending_updates=True)
     
