@@ -345,7 +345,7 @@ async def finalize_and_send_load(message: types.Message, state: FSMContext, data
             group_msg_ids[group_id] = sent_msg.message_id
         except Exception:
             pass
-            
+          
     active_loads[load_id] = {
         "user_id": user.id, 
         "group_msg_ids": group_msg_ids, 
@@ -374,7 +374,7 @@ async def accept_load_handler(call: types.CallbackQuery):
         if not load:
             await call.answer("❌ Bu yuk topilmadi!", show_alert=True)
             return
-            
+          
         if call.from_user.id == load["user_id"]:
             await call.answer("❌ O'zingizning e'loningizni o'zingiz qabul kila olmaysiz!", show_alert=True)
             return
@@ -412,7 +412,7 @@ async def start_cmd_bot2(message: types.Message, state: FSMContext):
     await track_user_activity(message.from_user, "@YukchiForwarderorg_Bot")
 
     if user_id in banned_users:
-        await message.answer("⛔️️ Siz bloklangansiz!")
+        await message.answer("⛔️ Siz bloklangansiz!")
         return
     is_admin = user_id in ADMINS
     if is_admin:
@@ -518,7 +518,7 @@ async def handle_broadcast_process(message: types.Message, state: FSMContext):
             try:
                 await message.copy_to(chat_id=uid)
                 sent_count += 1
-            except:
+            except: 
                 pass
     await message.answer(f"✅ Reklama muvaffaqiyatli tarqatildi! (Jami: {sent_count} ta)")
     await state.clear()
@@ -560,39 +560,45 @@ async def handle_unban_process(message: types.Message, state: FSMContext):
     await message.answer(f"✅ {target} bandan chiqarildi!")
     await state.clear()
 
-# MUHIM TUZATISH: Admin handlerlarni har ikkala bot uchun alohida to'g'ri ulash
+# Admin handlerlarni har ikkala botga ham ulaymiz
 for dp_inst in [dp1, dp2]:
     @dp_inst.callback_query(F.data == "admin_list_drivers")
-    async def ald_handler(c: types.CallbackQuery): await admin_list_drivers_handler(c)
+    async def ald(c: types.CallbackQuery): await admin_list_drivers_handler(c)
     
     @dp_inst.callback_query(F.data == "admin_list_curators")
-    async def alc_handler(c: types.CallbackQuery): await admin_list_curators_handler(c)
+    async def alc(c: types.CallbackQuery): await admin_list_curators_handler(c)
     
     @dp_inst.callback_query(F.data == "admin_stats")
-    async def als_handler(c: types.CallbackQuery): await admin_stats_handler(c)
+    async def als(c: types.CallbackQuery): await admin_stats_handler(c)
     
     @dp_inst.callback_query(F.data == "admin_broadcast")
-    async def bc_s_handler(c: types.CallbackQuery, s: FSMContext): await handle_broadcast_start(c, s)
+    async def bc_s(c: types.CallbackQuery, s: FSMContext): await handle_broadcast_start(c, s)
     
     @dp_inst.message(AdminState.waiting_for_broadcast)
-    async def bc_p_handler(m: types.Message, s: FSMContext): await handle_broadcast_process(m, s)
+    async def bc_p(m: types.Message, s: FSMContext): await handle_broadcast_process(m, s)
     
     @dp_inst.callback_query(F.data == "admin_ban_user")
-    async def bn_s_handler(c: types.CallbackQuery, s: FSMContext): await handle_ban_start(c, s)
+    async def bn_s(c: types.CallbackQuery, s: FSMContext): await handle_ban_start(c, s)
     
     @dp_inst.message(AdminState.waiting_for_ban_target, F.text)
-    async def bn_p_handler(m: types.Message, s: FSMContext): await handle_ban_process(m, s)
+    async def bn_p(m: types.Message, s: FSMContext): await handle_ban_process(m, s)
     
     @dp_inst.callback_query(F.data == "admin_unban_user")
-    async def ubn_s_handler(c: types.CallbackQuery, s: FSMContext): await handle_unban_start(c, s)
+    async def ubn_s(c: types.CallbackQuery, s: FSMContext): await handle_unban_start(c, s)
     
     @dp_inst.message(AdminState.waiting_for_unban_target, F.text)
-    async def ubn_p_handler(m: types.Message, s: FSMContext): await handle_unban_process(m, s)
+    async def ubn_p(m: types.Message, s: FSMContext): await handle_unban_process(m, s)
 
 
 # ================= FASTAPI & WEBHOOK SETUP =================
 @app.on_event("startup")
 async def startup_event():
+    # Webhookni har safar rootga kirganda emas, faqat bot ishga tushganda bir marta tozalab qo'yamiz
+    try:
+        await bot1.delete_webhook(drop_pending_updates=True)
+        await bot2.delete_webhook(drop_pending_updates=True)
+    except Exception:
+        pass
     asyncio.create_task(background_load_cleaner())
 
 async def background_load_cleaner():
@@ -627,9 +633,7 @@ async def unified_webhook(token: str, request: Request):
             update = Update.model_validate(data, context={"bot": bot1})
             await dp1.feed_update(bot1, update)
         elif token == API_TOKEN_2:
-            update = Update.model_validate(data, context={"bot": update_context := data}) # aiogram update parsing
-            # aiogram v3 uchun to'g'ri update validatsiyasi
-            update = Update.model_validate(data)
+            update = Update.model_validate(data, context={"bot": bot2})
             await dp2.feed_update(bot2, update)
         else:
             return {"status": "error", "message": "Invalid token"}
@@ -643,14 +647,15 @@ async def root(request: Request):
     url1 = f"{base_url}/webhook/{API_TOKEN_1}"
     url2 = f"{base_url}/webhook/{API_TOKEN_2}"
     
-    await bot1.delete_webhook(drop_pending_updates=True)
-    await bot2.delete_webhook(drop_pending_updates=True)
-    
-    await bot1.set_webhook(url1)
-    await bot2.set_webhook(url2)
+    # Webhooklarni avtomatik ulab qo'yish
+    try:
+        await bot1.set_webhook(url1)
+        await bot2.set_webhook(url2)
+    except Exception:
+        pass
     
     return {
-        "status": "Webhooklar muvaffaqiyatli yangilandi va ulandi!",
+        "status": "Botlar muvaffaqiyatli ishga tushdi va webhooklar ulandi!",
         "bot1_webhook": url1,
         "bot2_webhook": url2
     }
