@@ -89,13 +89,17 @@ class ComplaintState(StatesGroup):
 LINK_REGEX = r'(https?://[^\s]+|t\.me/[^\s]+|@[a-zA-Z0-9_]+)'
 SPAM_WORDS = ["kanalga", "gruppaga", "o'ting", "oting", "murojaat", "arzon", "aksiya", "reklama", "lichkaga", "manga oting", "http", "t.me"]
 
+# Yangilangan va to'liq ishlaydigan Admin Klaviaturasi
 def get_admin_keyboard():
     return InlineKeyboardMarkup(inline_keyboard=[
         [
             InlineKeyboardButton(text="🚛 Haydovchilar", callback_data="admin_list_drivers"),
             InlineKeyboardButton(text="📦 Kuratorlar", callback_data="admin_list_curators")
         ],
-        [InlineKeyboardButton(text="📢 Reklama yuborish", callback_data="admin_broadcast")],
+        [
+            InlineKeyboardButton(text="📊 Statistika", callback_data="admin_stats"),
+            InlineKeyboardButton(text="📢 Xabar tarqatish", callback_data="admin_broadcast")
+        ],
         [
             InlineKeyboardButton(text="🚫 Ban qilish", callback_data="admin_ban_user"),
             InlineKeyboardButton(text="✅ Bandan chiqarish", callback_data="admin_unban_user")
@@ -136,26 +140,6 @@ async def track_user_activity(user: types.User, bot_name: str):
     
     user_stats[user_id]["last_active"] = now_str
     save_json(STATS_FILE, user_stats)
-
-    total_bots_count = len(user_stats[user_id]["bots"])
-    used_bots_str = ", ".join(user_stats[user_id]["bots"])
-    
-    admin_msg = (
-        f"📊 <b>Faol Foydalanuvchi Statistikasi:</b>\n\n"
-        f"👤 Ism: {user.full_name}\n"
-        f"🔗 Username: @{user.username or 'yoq'}\n"
-        f"🆔 ID: <code>{user_id}</code>\n"
-        f"🤖 Botlar: {used_bots_str} (Jami: {total_bots_count} ta)\n"
-        f"⏰ Vaqt: {now_str}"
-    )
-    for admin_id in ADMINS:
-        try:
-            await bot1.send_message(chat_id=admin_id, text=admin_msg)
-        except Exception:
-            try:
-                await bot2.send_message(chat_id=admin_id, text=admin_msg)
-            except Exception:
-                pass
 
 
 # ================= 1-BOT HANDLERS (@YukchiForwarder_Bot) =================
@@ -275,7 +259,7 @@ async def load_from_handler(message: types.Message, state: FSMContext):
 @dp1.message(UserRoleState.load_to, F.text)
 async def load_to_handler(message: types.Message, state: FSMContext):
     await state.update_data(load_to=message.text.strip())
-    await message.answer("⚖️ Mashina turi va yuk vazni qancha?")
+    await message.answer("⚖️️ Mashina turi va yuk vazni qancha?")
     await state.set_state(UserRoleState.load_weight)
 
 @dp1.message(UserRoleState.load_weight, F.text)
@@ -370,16 +354,6 @@ async def finalize_and_send_load(message: types.Message, state: FSMContext, data
     }
     save_json(LOADS_FILE, active_loads)
     await message.answer("✅ Yuk guruhlarga va adminga yuborildi!")
-
-    for admin_id in ADMINS:
-        try:
-            await bot1.send_message(chat_id=admin_id, text=f"🔔 <b>Yangi yuk e'lon qilindi!</b>\n\n{final_caption}")
-        except Exception:
-            try:
-                await bot2.send_message(chat_id=admin_id, text=f"🔔 <b>Yangi yuk e'lon qilindi!</b>\n\n{final_caption}")
-            except Exception:
-                pass
-
     await state.clear()
 
 @dp1.callback_query(F.data.startswith("show_curator_phone:"))
@@ -402,9 +376,8 @@ async def accept_load_handler(call: types.CallbackQuery):
             await call.answer("❌ Bu yuk topilmadi!", show_alert=True)
             return
             
-        # Kurator o'zining e'lonini o'zi qabul qilishiga yo'l qo'ymaslik
         if call.from_user.id == load["user_id"]:
-            await call.answer("❌ O'zingizning e'loningizni o'zingiz qabul qila olmaysiz!", show_alert=True)
+            await call.answer("❌ O'zingizning e'loningizni o'zingiz qabul kila olmaysiz!", show_alert=True)
             return
 
         driver = drivers_db.get(call.from_user.id)
@@ -421,7 +394,7 @@ async def accept_load_handler(call: types.CallbackQuery):
         await call.answer("❌ Xatolik yuz berdi!", show_alert=True)
 
 
-# ================= 2-BOT HANDLERS (@YukchiForwarderorg_Bot - Nazoratchi) =================
+# ================= 2-BOT HANDLERS (@YukchiForwarderorg_Bot) =================
 def get_complaint_keyboard(is_admin: bool = False):
     buttons = [
         [InlineKeyboardButton(text="⚠️ Shikoyat qilish", callback_data="comp_shikoyat")],
@@ -494,17 +467,46 @@ async def security_group_guard(message: types.Message):
             pass
 
 
-# ================= COMMON ADMIN HANDLERS =================
+# ================= ADMIN ACTIONS & HANDLERS (Hamma botlar uchun ishlaydi) =================
+async def admin_list_drivers_handler(call: types.CallbackQuery):
+    await call.answer()
+    if call.from_user.id not in ADMINS: return
+    txt = "\n".join([f"👤 {d['name']} | 🚛 {d['car']}" for d in drivers_db.values()]) or "Haydovchilar yo'q"
+    await call.message.answer(f"🚛 <b>Haydovchilar ro'yxati:</b>\n\n{txt}")
+
+async def admin_list_curators_handler(call: types.CallbackQuery):
+    await call.answer()
+    if call.from_user.id not in ADMINS: return
+    txt = "\n".join([f"👤 {c['name']}" for c in curators_db.values()]) or "Kuratorlar yo'q"
+    await call.message.answer(f"📦 <b>Kuratorlar ro'yxati:</b>\n\n{txt}")
+
+async def admin_stats_handler(call: types.CallbackQuery):
+    await call.answer()
+    if call.from_user.id not in ADMINS: return
+    total_users = len(user_stats)
+    total_drivers = len(drivers_db)
+    total_curators = len(curators_db)
+    total_loads = len(active_loads)
+    total_banned = len(banned_users)
+    
+    stats_text = (
+        f"📊 <b>Bot Statistikasi:</b>\n\n"
+        f"👥 Jami foydalanuvchilar: {total_users} ta\n"
+        f"🚛 Haydovchilar: {total_drivers} ta\n"
+        f"📦 Kuratorlar: {total_curators} ta\n"
+        f"📌 Faol yuklar: {total_loads} ta\n"
+        f"🚫 Bloklanganlar: {total_banned} ta"
+    )
+    await call.message.answer(stats_text)
+
 async def handle_broadcast_start(call: types.CallbackQuery, state: FSMContext):
     await call.answer()
-    if call.from_user.id not in ADMINS: 
-        return
+    if call.from_user.id not in ADMINS: return
     await call.message.answer("📢 <b>Reklama matnini, rasm yoki videoni yuboring:</b>")
     await state.set_state(AdminState.waiting_for_broadcast)
 
-async def handle_broadcast_process(message: types.Message, state: FSMContext, bot_inst: Bot):
-    if message.from_user.id not in ADMINS: 
-        return
+async def handle_broadcast_process(message: types.Message, state: FSMContext):
+    if message.from_user.id not in ADMINS: return
     sent_count = 0
     for g in TARGET_GROUPS:
         try: 
@@ -524,14 +526,12 @@ async def handle_broadcast_process(message: types.Message, state: FSMContext, bo
 
 async def handle_ban_start(call: types.CallbackQuery, state: FSMContext):
     await call.answer()
-    if call.from_user.id not in ADMINS: 
-        return
+    if call.from_user.id not in ADMINS: return
     await call.message.answer("🚫 Ban qilinuvchi foydalanuvchi ID raqamini kiriting:")
     await state.set_state(AdminState.waiting_for_ban_target)
 
 async def handle_ban_process(message: types.Message, state: FSMContext):
-    if message.from_user.id not in ADMINS: 
-        return
+    if message.from_user.id not in ADMINS: return
     target = message.text.strip()
     key = int(target) if target.isdigit() else target
     banned_users[key] = target
@@ -547,14 +547,12 @@ async def handle_ban_process(message: types.Message, state: FSMContext):
 
 async def handle_unban_start(call: types.CallbackQuery, state: FSMContext):
     await call.answer()
-    if call.from_user.id not in ADMINS: 
-        return
+    if call.from_user.id not in ADMINS: return
     await call.message.answer("✅ Bandan chiqarish uchun foydalanuvchi ID raqamini yuboring:")
     await state.set_state(AdminState.waiting_for_unban_target)
 
 async def handle_unban_process(message: types.Message, state: FSMContext):
-    if message.from_user.id not in ADMINS: 
-        return
+    if message.from_user.id not in ADMINS: return
     target = message.text.strip()
     key = int(target) if target.isdigit() else target
     if key in banned_users: 
@@ -563,52 +561,37 @@ async def handle_unban_process(message: types.Message, state: FSMContext):
     await message.answer(f"✅ {target} bandan chiqarildi!")
     await state.clear()
 
-for dp_inst, b_inst in [(dp1, bot1), (dp2, bot2)]:
+# Admin handlerlarni har ikkala botga ham ulaymiz
+for dp_inst in [dp1, dp2]:
+    @dp_inst.callback_query(F.data == "admin_list_drivers")
+    async def ald(c: types.CallbackQuery): await admin_list_drivers_handler(c)
+    
+    @dp_inst.callback_query(F.data == "admin_list_curators")
+    async def alc(c: types.CallbackQuery): await admin_list_curators_handler(c)
+    
+    @dp_inst.callback_query(F.data == "admin_stats")
+    async def als(c: types.CallbackQuery): await admin_stats_handler(c)
+    
     @dp_inst.callback_query(F.data == "admin_broadcast")
-    async def bc_s(c: types.CallbackQuery, s: FSMContext): 
-        await handle_broadcast_start(c, s)
+    async def bc_s(c: types.CallbackQuery, s: FSMContext): await handle_broadcast_start(c, s)
+    
     @dp_inst.message(AdminState.waiting_for_broadcast)
-    async def bc_p(m: types.Message, s: FSMContext): 
-        await handle_broadcast_process(m, s, b_inst)
+    async def bc_p(m: types.Message, s: FSMContext): await handle_broadcast_process(m, s)
+    
     @dp_inst.callback_query(F.data == "admin_ban_user")
-    async def bn_s(c: types.CallbackQuery, s: FSMContext): 
-        await handle_ban_start(c, s)
+    async def bn_s(c: types.CallbackQuery, s: FSMContext): await handle_ban_start(c, s)
+    
     @dp_inst.message(AdminState.waiting_for_ban_target, F.text)
-    async def bn_p(m: types.Message, s: FSMContext): 
-        await handle_ban_process(m, s)
+    async def bn_p(m: types.Message, s: FSMContext): await handle_ban_process(m, s)
+    
     @dp_inst.callback_query(F.data == "admin_unban_user")
-    async def ubn_s(c: types.CallbackQuery, s: FSMContext): 
-        await handle_unban_start(c, s)
+    async def ubn_s(c: types.CallbackQuery, s: FSMContext): await handle_unban_start(c, s)
+    
     @dp_inst.message(AdminState.waiting_for_unban_target, F.text)
-    async def ubn_p(m: types.Message, s: FSMContext): 
-        await handle_unban_process(m, s)
-
-@dp1.callback_query(F.data == "admin_list_drivers")
-async def lst_drv(c: types.CallbackQuery):
-    await c.answer()
-    txt = "\n".join([f"{d['name']} | {d['car']}" for d in drivers_db.values()]) or "Haydovchilar yo'q"
-    await c.message.answer(f"🚛 Haydovchilar ro'yxati:\n{txt}")
-
-@dp1.callback_query(F.data == "admin_list_curators")
-async def lst_cur(c: types.CallbackQuery):
-    await c.answer()
-    txt = "\n".join([f"{cu['name']}" for cu in curators_db.values()]) or "Kuratorlar yo'q"
-    await c.message.answer(f"📦 Kuratorlar ro'yxati:\n{txt}")
-
-@dp2.callback_query(F.data == "admin_list_drivers")
-async def lst_drv2(c: types.CallbackQuery):
-    await c.answer()
-    txt = "\n".join([f"{d['name']} | {d['car']}" for d in drivers_db.values()]) or "Haydovchilar yo'q"
-    await c.message.answer(f"🚛 Haydovchilar ro'yxati:\n{txt}")
-
-@dp2.callback_query(F.data == "admin_list_curators")
-async def lst_cur2(c: types.CallbackQuery):
-    await c.answer()
-    txt = "\n".join([f"{cu['name']}" for cu in curators_db.values()]) or "Kuratorlar yo'q"
-    await c.message.answer(f"📦 Kuratorlar ro'yxati:\n{txt}")
+    async def ubn_p(m: types.Message, s: FSMContext): await handle_unban_process(m, s)
 
 
-# ================= FASTAPI & WEBHOOK SETUP (DELETE & RE-SET) =================
+# ================= FASTAPI & WEBHOOK SETUP =================
 @app.on_event("startup")
 async def startup_event():
     asyncio.create_task(background_load_cleaner())
@@ -659,16 +642,15 @@ async def root(request: Request):
     url1 = f"{base_url}/webhook/{API_TOKEN_1}"
     url2 = f"{base_url}/webhook/{API_TOKEN_2}"
     
-    # Oldingi webhook'larni o'chirib, yangidan toza qilib ulaymiz (delete_webhook)
+    # Har safar sahifa ochilganda eski webhook o'chib, yangisi avtomatik ulanadi
     await bot1.delete_webhook(drop_pending_updates=True)
     await bot2.delete_webhook(drop_pending_updates=True)
     
-    # Yangi webhooklarni o'rnatish
     await bot1.set_webhook(url1)
     await bot2.set_webhook(url2)
     
     return {
-        "status": "Eski webhooklar o'chirilib, yangilari muvaffaqiyatli ulandi!",
+        "status": "Webhooklar muvaffaqiyatli yangilandi va ulandi!",
         "bot1_webhook": url1,
         "bot2_webhook": url2
     }
