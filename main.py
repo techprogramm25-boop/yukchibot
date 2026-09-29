@@ -4,7 +4,7 @@ import os
 import random
 import logging
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, Request, BackgroundTasks
+from fastapi import FastAPI, Request
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.enums import ChatMemberStatus
 from aiogram.fsm.storage.memory import MemoryStorage
@@ -20,7 +20,6 @@ ADMINS = [6977836294, 8409259397]
 REQUIRED_CHANNELS = ["@YukchiForwarder", "@YukchiForwarderPeople"]
 TARGET_GROUPS = [-1003968416767, -1003775919755]
 SUPPORT_SITE_URL = "https://yukchibot.vercel.app/" 
-ELONCHI_BOT_USERNAME = "YukchiForwarder_Bot"
 
 logging.basicConfig(level=logging.INFO)
 
@@ -30,7 +29,7 @@ dp1 = Dispatcher(storage=MemoryStorage())
 bot2 = Bot(token=API_TOKEN_2)
 dp2 = Dispatcher(storage=MemoryStorage())
 
-# ================= JSON DATA STORAGE (/tmp) =================
+# ================= JSON STORAGE (/tmp) =================
 DRIVERS_FILE = "/tmp/drivers.json"
 CURATORS_FILE = "/tmp/curators.json"
 BANNED_FILE = "/tmp/banned.json"
@@ -49,7 +48,7 @@ def load_json(path):
 def save_json(path, data):
     try:
         with open(path, "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_audit=False, indent=4) if "ensure_ascii" in json.dump.__code__.co_varnames else json.dump(data, f, indent=4)
+            json.dump(data, f, indent=4)
     except Exception as e:
         logging.error(f"Xatolik {path}: {e}")
 
@@ -76,9 +75,8 @@ class AdminState(StatesGroup):
 class ComplaintState(StatesGroup):
     waiting_for_complaint_text = State()
 
-# Xaker va spamdan himoya uchun kuchli filtrlar
 LINK_REGEX = r'(https?://[^\s]+|t\.me/[^\s]+|@[a-zA-Z0-9_]+)'
-SPAM_WORDS = ["kanalga", "gruppaga", "o'ting", "oting", "murojaat", "arzon", "aksiya", "reklama", "lichkaga", "http", "t.me", "botga oling", "pulish"]
+SPAM_WORDS = ["kanalga", "gruppaga", "o'ting", "murojaat", "arzon", "aksiya", "reklama", "lichkaga", "http", "t.me"]
 
 def get_admin_keyboard():
     return InlineKeyboardMarkup(inline_keyboard=[
@@ -87,10 +85,10 @@ def get_admin_keyboard():
         [InlineKeyboardButton(text="🚫 Ban qilish", callback_data="admin_ban_user"), InlineKeyboardButton(text="✅ Bandan chiqarish", callback_data="admin_unban_user")]
     ])
 
-async def check_subscriptions(user_id: int) -> bool:
+async def check_subscriptions(user_id: int, bot_obj: Bot) -> bool:
     for channel in REQUIRED_CHANNELS:
         try:
-            member = await bot1.get_chat_member(chat_id=channel, user_id=user_id)
+            member = await bot_obj.get_chat_member(chat_id=channel, user_id=user_id)
             if member.status not in [ChatMemberStatus.CREATOR, ChatMemberStatus.ADMINISTRATOR, ChatMemberStatus.MEMBER]:
                 return False
         except Exception:
@@ -105,13 +103,10 @@ def get_sub_keyboard():
     ])
 
 async def track_user_activity(user: types.User, bot_name: str):
-    if user.id not in user_stats:
-        user_stats[user.id] = {"name": user.full_name, "username": user.username or "yoq", "bots": []}
-    if bot_name not in user_stats[user.id]["bots"]:
-        user_stats[user.id]["bots"].append(bot_name)
+    user_stats[user.id] = {"name": user.full_name, "username": user.username or "yoq", "bots": [bot_name]}
     save_json(STATS_FILE, user_stats)
 
-# ================= 1-BOT HANDLERS (@YukchiForwarder_Bot) =================
+# ================= 1-BOT (Asosiy Yukchi Bot) =================
 @dp1.message(F.text == "/start")
 async def start_cmd_bot1(message: types.Message, state: FSMContext):
     await state.clear()
@@ -125,8 +120,7 @@ async def start_cmd_bot1(message: types.Message, state: FSMContext):
         await message.answer("👨‍💻 <b>Admin Boshqaruv Paneli:</b>", reply_markup=get_admin_keyboard())
         return
     
-    # Obuna tekshiruvi
-    if not await check_subscriptions(user_id):
+    if not await check_subscriptions(user_id, bot1):
         await message.answer("⚠️ <b>Botdan foydalanish uchun avval kanallarimizga obuna bo'ling:</b>", reply_markup=get_sub_keyboard())
         return
 
@@ -150,7 +144,7 @@ async def start_cmd_bot1(message: types.Message, state: FSMContext):
 
     role_keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🚛 Haydovchiman", callback_data="role_driver")],
-        [InlineKeyboardButton(text="📦 Kuraturman", callback_data="role_curator")]
+        [InlineKeyboardButton(text="📦 Kuratoriman", callback_data="role_curator")]
     ])
     await message.answer("Assalomu alaykum! Rolingizni tanlang:", reply_markup=role_keyboard)
     await state.set_state(UserRoleState.choosing_role)
@@ -158,14 +152,12 @@ async def start_cmd_bot1(message: types.Message, state: FSMContext):
 @dp1.callback_query(F.data == "check_sub")
 async def check_sub_cb(call: types.CallbackQuery, state: FSMContext):
     await call.answer()
-    if await check_subscriptions(call.from_user.id):
-        try: await call.message.delete()
-        except: pass
+    if await check_subscriptions(call.from_user.id, bot1):
         role_keyboard = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="🚛 Haydovchiman", callback_data="role_driver")],
-            [InlineKeyboardButton(text="📦 Kuraturman", callback_data="role_curator")]
+            [InlineKeyboardButton(text="📦 Kuratoriman", callback_data="role_curator")]
         ])
-        await call.message.answer("✅ Obuna tasdiqlandi! Rolingizni tanlang:", reply_markup=role_keyboard)
+        await call.message.edit_text("✅ Obuna tasdiqlandi! Rolingizni tanlang:", reply_markup=role_keyboard)
         await state.set_state(UserRoleState.choosing_role)
     else:
         await call.answer("❌ Hali hamma kanallarga qo'shilmadingiz!", show_alert=True)
@@ -179,7 +171,7 @@ async def role_driver(call: types.CallbackQuery, state: FSMContext):
 @dp1.message(UserRoleState.driver_get_name, F.text)
 async def driver_name(message: types.Message, state: FSMContext):
     await state.update_data(d_name=message.text.strip())
-    await message.answer("🚛 Mashinangiz nomini kiriting (masalan: Cobalt, Damas, MAN):")
+    await message.answer("🚛 Mashinangiz nomini kiriting (masalan: Cobalt, Damas):")
     await state.set_state(UserRoleState.driver_get_car)
 
 @dp1.message(UserRoleState.driver_get_car, F.text)
@@ -194,7 +186,7 @@ async def driver_car(message: types.Message, state: FSMContext):
 @dp1.callback_query(F.data == "role_curator")
 async def role_curator(call: types.CallbackQuery, state: FSMContext):
     await call.answer()
-    await call.message.edit_text("👤 Kuratorning to'liqism-sharifini kiriting:")
+    await call.message.edit_text("👤 Kuratorning to'liq ism-sharifini kiriting:")
     await state.set_state(UserRoleState.curator_get_name)
 
 @dp1.message(UserRoleState.curator_get_name, F.text)
@@ -215,25 +207,22 @@ async def curator_phone(message: types.Message, state: FSMContext):
 @dp1.callback_query(F.data == "curator_new_load")
 async def curator_new_load(call: types.CallbackQuery, state: FSMContext):
     await call.answer()
-    await call.message.edit_text("📝 Yuk e'lonining matnini to'liq yuboring (Qayerdan, qayerga, vazni va hokazo):")
+    await call.message.edit_text("📝 Yuk e'lonining matnini to'liq yuboring (Qayerdan, qayerga, narxi va hokazo):")
     await state.set_state(UserRoleState.load_text)
 
 @dp1.message(UserRoleState.load_text, F.text)
 async def load_text_save(message: types.Message, state: FSMContext):
-    load_id = random.randint(1000, 9999) # Random ID
+    load_id = random.randint(1000, 9999)
     user = message.from_user
     curator = curators_db.get(user.id, {"name": user.full_name, "phone": "Mavjud emas"})
-    
     load_content = message.text.strip()
     
-    # Guruhga tashlanadigan matn (Nomeri yashirin, faqat ID va ma'lumot)
     group_text = (
         f"📦 <b>YUK E'LONI (ID: #{load_id})</b>\n\n"
         f"{load_content}\n\n"
         f"──────────────────\n"
         f"👤 <b>Kurator:</b> {curator['name']}\n"
         f"🆔 <b>Yuk ID raqami:</b> <code>{load_id}</code>\n"
-        f"📢 <b>Kanal:</b> @YukchiForwarder\n"
         f"🌐 <b>Support:</b> {SUPPORT_SITE_URL}"
     )
     
@@ -262,7 +251,7 @@ async def load_text_save(message: types.Message, state: FSMContext):
 @dp1.callback_query(F.data == "driver_accept_menu")
 async def driver_accept_menu(call: types.CallbackQuery, state: FSMContext):
     await call.answer()
-    await call.message.answer("📥 Qabul qilmoqchi bo'lgan yukning <b>ID raqamini</b> yuboring (masalan: 4821):")
+    await call.message.answer("📥 Qabul qilmoqchi bo'lgan yukning <b>ID raqamini</b> yuboring:")
     await state.set_state(UserRoleState.accept_load_id)
 
 @dp1.message(UserRoleState.accept_load_id, F.text)
@@ -283,7 +272,6 @@ async def driver_accept_process(message: types.Message, state: FSMContext):
     load["driver_id"] = message.from_user.id
     save_json(LOADS_FILE, active_loads)
     
-    # Kuratorga haydovchi haqida xabar berish (Nomeri bilan)
     try:
         await bot1.send_message(
             chat_id=load["user_id"],
@@ -297,24 +285,43 @@ async def driver_accept_process(message: types.Message, state: FSMContext):
     except:
         pass
         
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="❌ Atmen qilish (Bekor qilish)", callback_data=f"cancel_load_{load_id}")]
+    ])
     await message.answer(
         f"✅ Siz #{load_id} raqamli yukni muvaffaqiyatli qabul qildingiz!\n\n"
         f"📦 <b>Ma'lumot:</b> {load['text']}\n"
-        f"📞 <b>Kurator raqami:</b> {load['curator_phone']}"
+        f"📞 <b>Kurator raqami:</b> {load['curator_phone']}",
+        reply_markup=kb
     )
     await state.clear()
+
+@dp1.callback_query(F.data.startswith("cancel_load_"))
+async def cancel_load_callback(call: types.CallbackQuery):
+    await call.answer("Yuk bekor qilindi!")
+    load_id = int(call.data.split("_")[-1])
+    if load_id in active_loads:
+        active_loads[load_id]["status"] = "faol"
+        save_json(LOADS_FILE, active_loads)
+    await call.message.edit_text("❌ Siz bu yukni bekor qildingiz.")
 
 @dp1.callback_query(F.data == "driver_cancel_menu")
 async def driver_cancel_menu(call: types.CallbackQuery, state: FSMContext):
     await call.answer()
     await call.message.answer("❌ Bekor qilmoqchi bo'lgan yukingizning <b>ID raqamini</b> yuboring:")
-    await state.set_state(UserRoleState.accept_load_id) # soddalik uchun shu holat ishlatiladi
+    await state.set_state(UserRoleState.accept_load_id)
 
-# ================= 2-BOT HANDLERS (@YukchiForwarderorg_Bot - Shikoyat va himoya) =================
+# ================= 2-BOT (Nazoratchi va Shikoyat Bot) =================
 @dp2.message(F.text == "/start")
 async def start_bot2(message: types.Message, state: FSMContext):
     await state.clear()
+    user_id = message.from_user.id
     await track_user_activity(message.from_user, "@YukchiForwarderorg_Bot")
+
+    if user_id in ADMINS:
+        await message.answer("👨‍💻 <b>Nazoratchi Bot Admin Paneli:</b>", reply_markup=get_admin_keyboard())
+        return
+
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="⚠️ Shikoyat qilish", callback_data="comp_shikoyat"), InlineKeyboardButton(text="❓ Muammo bildirish", callback_data="comp_muammo")],
         [InlineKeyboardButton(text="🌐 Support Sayt", url=SUPPORT_SITE_URL)]
@@ -338,37 +345,24 @@ async def comp_send(message: types.Message, state: FSMContext):
     await message.answer("✅ Adminga yuborildi!")
     await state.clear()
 
-# Guruhlardagi Xakerlar va Reklamalardan To'liq Himoya (Antispam)
-@dp2.message(lambda m: m.chat.id in TARGET_GROUPS)
-async def group_guard(message: types.Message):
-    if message.from_user.id in ADMINS: return
-    text = (message.text or message.caption or "").lower()
-    if any(w in text for w in SPAM_WORDS) or bool(re.search(LINK_REGEX, text)):
-        try:
-            await message.delete()
-            await bot2.ban_chat_member(chat_id=message.chat.id, user_id=message.from_user.id)
-            banned_users[message.from_user.id] = message.from_user.full_name
-            save_json(BANNED_FILE, banned_users)
-        except: pass
-
-# ================= ADMIN HANDLERLAR =================
+# ================= UMUMIY ADMIN PANEL FUNKSIYALARI =================
 async def admin_list_drivers(call: types.CallbackQuery):
     if call.from_user.id not in ADMINS: return
-    txt = "\n".join([f"👤 {d['name']} | 🚛 {d['car']}" for d in drivers_db.values()]) or "Haydovchilar yo'q"
+    txt = "\n".join([f"👤 {d['name']} | 🚛 {d['car']} | @{d['username']}" for d in drivers_db.values()]) or "Haydovchilar yo'q"
     await call.message.answer(f"🚛 <b>Haydovchilar ro'yxati:</b>\n\n{txt}")
 
 async def admin_list_curators(call: types.CallbackQuery):
     if call.from_user.id not in ADMINS: return
-    txt = "\n".join([f"👤 {c['name']} | 📞 {c['phone']}" for c in curators_db.values()]) or "Kuratorlar yo'q"
+    txt = "\n".join([f"👤 {c['name']} | 📞 {c['phone']} | @{c['username']}" for c in curators_db.values()]) or "Kuratorlar yo'q"
     await call.message.answer(f"📦 <b>Kuratorlar ro'yxati:</b>\n\n{txt}")
 
 async def admin_stats(call: types.CallbackQuery):
     if call.from_user.id not in ADMINS: return
-    await call.message.answer(f"📊 Statistika:\n👥 Foydalanuvchilar: {len(user_stats)}\n🚛 Haydovchilar: {len(drivers_db)}\n📦 Kuratorlar: {len(curators_db)}")
+    await call.message.answer(f"📊 <b>Statistika:</b>\n👥 Foydalanuvchilar: {len(user_stats)}\n🚛 Haydovchilar: {len(drivers_db)}\n📦 Kuratorlar: {len(curators_db)}")
 
 async def broadcast_start(call: types.CallbackQuery, state: FSMContext):
     if call.from_user.id not in ADMINS: return
-    await call.message.answer("📢 Reklama matnini yuboring:")
+    await call.message.answer("📢 Barcha foydalanuvchilarga yuboriladigan reklama matnini kiriting:")
     await state.set_state(AdminState.waiting_for_broadcast)
 
 async def broadcast_process(message: types.Message, state: FSMContext):
@@ -379,25 +373,25 @@ async def broadcast_process(message: types.Message, state: FSMContext):
             await message.copy_to(chat_id=int(uid))
             count += 1
         except: pass
-    await message.answer(f"✅ Reklama {count} ta foydalanuvchiga tarqatildi!")
+    await message.answer(f"✅ Reklama {count} ta foydalanuvchiga yetkazildi!")
     await state.clear()
 
 async def ban_start(call: types.CallbackQuery, state: FSMContext):
     if call.from_user.id not in ADMINS: return
-    await call.message.answer("🚫 Ban qilinadigan user ID:")
+    await call.message.answer("🚫 Ban qilinadigan foydalanuvchi ID raqamini yuboring:")
     await state.set_state(AdminState.waiting_for_ban_target)
 
 async def ban_process(message: types.Message, state: FSMContext):
-    if call_id := message.text.strip().isdigit():
+    if message.text.strip().isdigit():
         uid = int(message.text.strip())
         banned_users[uid] = "Blocked"
         save_json(BANNED_FILE, banned_users)
-        await message.answer("✅ Ban qilindi!")
+        await message.answer(f"✅ {uid} ban qilindi!")
     await state.clear()
 
 async def unban_start(call: types.CallbackQuery, state: FSMContext):
     if call.from_user.id not in ADMINS: return
-    await call.message.answer("✅ Bandan chiqarish uchun ID:")
+    await call.message.answer("✅ Bandan chiqariladigan foydalanuvchi ID raqamini yuboring:")
     await state.set_state(AdminState.waiting_for_unban_target)
 
 async def unban_process(message: types.Message, state: FSMContext):
@@ -405,28 +399,40 @@ async def unban_process(message: types.Message, state: FSMContext):
         uid = int(message.text.strip())
         if uid in banned_users: del banned_users[uid]
         save_json(BANNED_FILE, banned_users)
-        await message.answer("✅ Bandan chiqarildi!")
+        await message.answer(f"✅ {uid} bandan chiqarildi!")
     await state.clear()
 
 for dp_inst in [dp1, dp2]:
     @dp_inst.callback_query(F.data == "admin_list_drivers")
-    async def ald(c: types.CallbackQuery): await admin_list_drivers(c)
+    async def ald(c: types.CallbackQuery): await call_answer_and_run(c, admin_list_drivers)
     @dp_inst.callback_query(F.data == "admin_list_curators")
-    async def alc(c: types.CallbackQuery): await admin_list_curators(c)
+    async def alc(c: types.CallbackQuery): await call_answer_and_run(c, admin_list_curators)
     @dp_inst.callback_query(F.data == "admin_stats")
-    async def als(c: types.CallbackQuery): await admin_stats(c)
+    async def als(c: types.CallbackQuery): await call_answer_and_run(c, admin_stats)
     @dp_inst.callback_query(F.data == "admin_broadcast")
-    async def bcs(c: types.CallbackQuery, s: FSMContext): await broadcast_start(c, s)
-    @dp_inst.message(AdminState.waiting_for_broadcast)
-    async def bcp(m: types.Message, s: FSMContext): await broadcast_process(m, s)
+    async def bcs(c: types.CallbackQuery, s: FSMContext): await call_answer_and_run(c, lambda x: broadcast_start(x, s))
     @dp_inst.callback_query(F.data == "admin_ban_user")
-    async def bns(c: types.CallbackQuery, s: FSMContext): await ban_start(c, s)
-    @dp_inst.message(AdminState.waiting_for_ban_target)
-    async def bnp(m: types.Message, s: FSMContext): await ban_process(m, s)
+    async def bns(c: types.CallbackQuery, s: FSMContext): await call_answer_and_run(c, lambda x: ban_start(x, s))
     @dp_inst.callback_query(F.data == "admin_unban_user")
-    async def ubs(c: types.CallbackQuery, s: FSMContext): await unban_start(c, s)
-    @dp_inst.message(AdminState.waiting_for_unban_target)
-    async def ubp(m: types.Message, s: FSMContext): await unban_process(m, s)
+    async def ubs(c: types.CallbackQuery, s: FSMContext): await call_answer_and_run(c, lambda x: unban_start(x, s))
+
+async def call_answer_and_run(call: types.CallbackQuery, func):
+    await call.answer()
+    await func(call)
+
+@dp1.message(AdminState.waiting_for_broadcast)
+async def bcp(m: types.Message, s: FSMContext): await broadcast_process(m, s)
+@dp1.message(AdminState.waiting_for_ban_target)
+async def bnp(m: types.Message, s: FSMContext): await ban_process(m, s)
+@dp1.message(AdminState.waiting_for_unban_target)
+async def ubp(m: types.Message, s: FSMContext): await unban_process(m, s)
+
+@dp2.message(AdminState.waiting_for_broadcast)
+async def bcp2(m: types.Message, s: FSMContext): await broadcast_process(m, s)
+@dp2.message(AdminState.waiting_for_ban_target)
+async def bnp2(m: types.Message, s: FSMContext): await ban_process(m, s)
+@dp2.message(AdminState.waiting_for_unban_target)
+async def ubp2(m: types.Message, s: FSMContext): await unban_process(m, s)
 
 # ================= FASTAPI WEBHOOKS =================
 @asynccontextmanager
@@ -435,22 +441,14 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(lifespan=lifespan)
 
-async def process_update(bot, dp, data):
-    try:
-        update = Update.model_validate(data, context={"bot": bot})
-        await dp.feed_update(bot, update)
-    except Exception as e:
-        logging.error(f"Xato: {e}")
-
 @app.post("/webhook/{token}")
-async def webhook_handler(token: str, request: Request, bg: BackgroundTasks):
+async def webhook_handler(token: str, request: Request):
     data = await request.json()
+    update = Update.model_validate(data, context={"bot": bot1 if token == API_TOKEN_1 else bot2})
     if token == API_TOKEN_1:
-        bg.add_task(process_update, bot1, dp1, data)
+        await dp1.feed_update(bot1, update)
     elif token == API_TOKEN_2:
-        bg.add_task(process_update, bot2, dp2, data)
-    else:
-        return {"status": "error"}
+        await dp2.feed_update(bot2, update)
     return {"status": "ok"}
 
 @app.get("/")
