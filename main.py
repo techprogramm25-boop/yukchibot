@@ -1,9 +1,9 @@
 import re
 import json
 import os
+import random
 import logging
 from contextlib import asynccontextmanager
-from datetime import datetime, timedelta
 from fastapi import FastAPI, Request, BackgroundTasks
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.enums import ChatMemberStatus
@@ -17,7 +17,6 @@ API_TOKEN_1 = "8726416871:AAEKluMhwL7k4eP0RkchwvF_f82VQmLgc3A" # @YukchiForwarde
 API_TOKEN_2 = "8112720689:AAFR_KtcgUYH3vBlsFZcBRj4qH3SGCwI2Zo" # @YukchiForwarderorg_Bot
 
 ADMINS = [6977836294, 8409259397]
-
 REQUIRED_CHANNELS = ["@YukchiForwarder", "@YukchiForwarderPeople"]
 TARGET_GROUPS = [-1003968416767, -1003775919755]
 SUPPORT_SITE_URL = "https://yukchibot.vercel.app/" 
@@ -31,7 +30,7 @@ dp1 = Dispatcher(storage=MemoryStorage())
 bot2 = Bot(token=API_TOKEN_2)
 dp2 = Dispatcher(storage=MemoryStorage())
 
-# ================= JSON DATA STORAGE (VERCEL /tmp) =================
+# ================= JSON DATA STORAGE (/tmp) =================
 DRIVERS_FILE = "/tmp/drivers.json"
 CURATORS_FILE = "/tmp/curators.json"
 BANNED_FILE = "/tmp/banned.json"
@@ -50,31 +49,24 @@ def load_json(path):
 def save_json(path, data):
     try:
         with open(path, "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False, indent=4)
+            json.dump(data, f, ensure_audit=False, indent=4) if "ensure_ascii" in json.dump.__code__.co_varnames else json.dump(data, f, indent=4)
     except Exception as e:
-        logging.error(f"JSON saqlashda xatolik {path}: {e}")
+        logging.error(f"Xatolik {path}: {e}")
 
-drivers_db = {int(k) if k.isdigit() else k: v for k, v in load_json(DRIVERS_FILE).items()}
-curators_db = {int(k) if k.isdigit() else k: v for k, v in load_json(CURATORS_FILE).items()}
-banned_users = {int(k) if k.isdigit() else k: v for k, v in load_json(BANNED_FILE).items()}
-active_loads = {int(k) if k.isdigit() else k: v for k, v in load_json(LOADS_FILE).items()}
-user_stats = {int(k) if k.isdigit() else k: v for k, v in load_json(STATS_FILE).items()}
-
-load_counter = max(active_loads.keys()) if active_loads else 0
+drivers_db = {int(k) if str(k).isdigit() else k: v for k, v in load_json(DRIVERS_FILE).items()}
+curators_db = {int(k) if str(k).isdigit() else k: v for k, v in load_json(CURATORS_FILE).items()}
+banned_users = {int(k) if str(k).isdigit() else k: v for k, v in load_json(BANNED_FILE).items()}
+active_loads = {int(k) if str(k).isdigit() else k: v for k, v in load_json(LOADS_FILE).items()}
+user_stats = {int(k) if str(k).isdigit() else k: v for k, v in load_json(STATS_FILE).items()}
 
 class UserRoleState(StatesGroup):
     choosing_role = State()
     driver_get_name = State()
     driver_get_car = State()
     curator_get_name = State()
-    curator_choice_type = State()
-    load_from = State()
-    load_to = State()
-    load_weight = State()
-    load_info = State()
-    load_urgency = State()
-    load_days = State()
-    load_ready_text = State()
+    curator_get_phone = State()
+    load_text = State()
+    accept_load_id = State()
 
 class AdminState(StatesGroup):
     waiting_for_ban_target = State()
@@ -84,23 +76,15 @@ class AdminState(StatesGroup):
 class ComplaintState(StatesGroup):
     waiting_for_complaint_text = State()
 
+# Xaker va spamdan himoya uchun kuchli filtrlar
 LINK_REGEX = r'(https?://[^\s]+|t\.me/[^\s]+|@[a-zA-Z0-9_]+)'
-SPAM_WORDS = ["kanalga", "gruppaga", "o'ting", "oting", "murojaat", "arzon", "aksiya", "reklama", "lichkaga", "manga oting", "http", "t.me"]
+SPAM_WORDS = ["kanalga", "gruppaga", "o'ting", "oting", "murojaat", "arzon", "aksiya", "reklama", "lichkaga", "http", "t.me", "botga oling", "pulish"]
 
 def get_admin_keyboard():
     return InlineKeyboardMarkup(inline_keyboard=[
-        [
-            InlineKeyboardButton(text="🚛 Haydovchilar", callback_data="admin_list_drivers"),
-            InlineKeyboardButton(text="📦 Kuratorlar", callback_data="admin_list_curators")
-        ],
-        [
-            InlineKeyboardButton(text="📊 Statistika", callback_data="admin_stats"),
-            InlineKeyboardButton(text="📢 Xabar tarqatish", callback_data="admin_broadcast")
-        ],
-        [
-            InlineKeyboardButton(text="🚫 Ban qilish", callback_data="admin_ban_user"),
-            InlineKeyboardButton(text="✅ Bandan chiqarish", callback_data="admin_unban_user")
-        ]
+        [InlineKeyboardButton(text="🚛 Haydovchilar", callback_data="admin_list_drivers"), InlineKeyboardButton(text="📦 Kuratorlar", callback_data="admin_list_curators")],
+        [InlineKeyboardButton(text="📊 Statistika", callback_data="admin_stats"), InlineKeyboardButton(text="📢 Xabar tarqatish", callback_data="admin_broadcast")],
+        [InlineKeyboardButton(text="🚫 Ban qilish", callback_data="admin_ban_user"), InlineKeyboardButton(text="✅ Bandan chiqarish", callback_data="admin_unban_user")]
     ])
 
 async def check_subscriptions(user_id: int) -> bool:
@@ -117,20 +101,17 @@ def get_sub_keyboard():
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="📢 1-Kanalga qo'shilish", url="https://t.me/YukchiForwarder")],
         [InlineKeyboardButton(text="📢 2-Kanalga qo'shilish", url="https://t.me/YukchiForwarderPeople")],
-        [InlineKeyboardButton(text="🔄 Tekshirish", callback_data="check_sub")]
+        [InlineKeyboardButton(text="🔄 Obunani tekshirish", callback_data="check_sub")]
     ])
 
 async def track_user_activity(user: types.User, bot_name: str):
-    user_id = user.id
-    now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    if user_id not in user_stats:
-        user_stats[user_id] = {"name": user.full_name, "username": user.username or "yoq", "bots": [], "last_active": now_str}
-    if bot_name not in user_stats[user_id]["bots"]:
-        user_stats[user_id]["bots"].append(bot_name)
-    user_stats[user_id]["last_active"] = now_str
+    if user.id not in user_stats:
+        user_stats[user.id] = {"name": user.full_name, "username": user.username or "yoq", "bots": []}
+    if bot_name not in user_stats[user.id]["bots"]:
+        user_stats[user.id]["bots"].append(bot_name)
     save_json(STATS_FILE, user_stats)
 
-# ================= 1-BOT HANDLERS =================
+# ================= 1-BOT HANDLERS (@YukchiForwarder_Bot) =================
 @dp1.message(F.text == "/start")
 async def start_cmd_bot1(message: types.Message, state: FSMContext):
     await state.clear()
@@ -138,48 +119,51 @@ async def start_cmd_bot1(message: types.Message, state: FSMContext):
     await track_user_activity(message.from_user, "@YukchiForwarder_Bot")
 
     if user_id in banned_users:
-        await message.answer("⛔️ <b>Siz botdan va guruhlardan bloklangansiz!</b>")
+        await message.answer("⛔️ Siz botdan bloklangansiz!")
         return
     if user_id in ADMINS:
         await message.answer("👨‍💻 <b>Admin Boshqaruv Paneli:</b>", reply_markup=get_admin_keyboard())
         return
+    
+    # Obuna tekshiruvi
     if not await check_subscriptions(user_id):
-        await message.answer("⚠️ <b>Botdan to'liq foydalanish uchun quyidagi kanallarimizga obuna bo'ling:</b>", reply_markup=get_sub_keyboard())
+        await message.answer("⚠️ <b>Botdan foydalanish uchun avval kanallarimizga obuna bo'ling:</b>", reply_markup=get_sub_keyboard())
         return
+
     if user_id in drivers_db:
         d = drivers_db[user_id]
-        await message.answer(f"🚛 <b>Xush kelibsiz, haydovchi {d['name']}!</b>\nMashinangiz: {d['car']}", reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+        kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="📦 Yukni qabul qilish (ID orqali)", callback_data="driver_accept_menu")],
+            [InlineKeyboardButton(text="❌ Yukni bekor qilish", callback_data="driver_cancel_menu")],
             [InlineKeyboardButton(text="🌐 Support Sayt", url=SUPPORT_SITE_URL)]
-        ]))
+        ])
+        await message.answer(f"🚛 <b>Xush kelibsiz, haydovchi {d['name']}!</b>\nMashinangiz: {d['car']}", reply_markup=kb)
         return
     elif user_id in curators_db:
         c = curators_db[user_id]
-        choice_kb = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="✍️ Qo'lda kiritish", callback_data="load_manual")],
-            [InlineKeyboardButton(text="⚡️ Tayyor e'lon tashlash", callback_data="load_ready")]
+        kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="📝 Yangi yuk e'lon qilish", callback_data="curator_new_load")],
+            [InlineKeyboardButton(text="🌐 Support Sayt", url=SUPPORT_SITE_URL)]
         ])
-        await message.answer(f"📦 <b>Xush kelibsiz, kurator {c['name']}!</b>\nYuk kiritish usulini tanlang:", reply_markup=choice_kb)
-        await state.set_state(UserRoleState.curator_choice_type)
+        await message.answer(f"📦 <b>Xush kelibsiz, kurator {c['name']}!</b>", reply_markup=kb)
         return
 
     role_keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🚛 Haydovchi", callback_data="role_driver")],
-        [InlineKeyboardButton(text="📦 Kurator", callback_data="role_curator")]
+        [InlineKeyboardButton(text="🚛 Haydovchiman", callback_data="role_driver")],
+        [InlineKeyboardButton(text="📦 Kuraturman", callback_data="role_curator")]
     ])
-    await message.answer("<b>Assalomu alaykum!</b> Oq yo'l botiga xush kelibsiz. 🌟\n\nIltimos, o'z rolingizni tanlang:", reply_markup=role_keyboard)
+    await message.answer("Assalomu alaykum! Rolingizni tanlang:", reply_markup=role_keyboard)
     await state.set_state(UserRoleState.choosing_role)
 
 @dp1.callback_query(F.data == "check_sub")
-async def check_sub_callback(call: types.CallbackQuery, state: FSMContext):
+async def check_sub_cb(call: types.CallbackQuery, state: FSMContext):
     await call.answer()
     if await check_subscriptions(call.from_user.id):
-        try:
-            await call.message.delete()
-        except Exception:
-            pass
+        try: await call.message.delete()
+        except: pass
         role_keyboard = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="🚛 Haydovchi", callback_data="role_driver")],
-            [InlineKeyboardButton(text="📦 Kurator", callback_data="role_curator")]
+            [InlineKeyboardButton(text="🚛 Haydovchiman", callback_data="role_driver")],
+            [InlineKeyboardButton(text="📦 Kuraturman", callback_data="role_curator")]
         ])
         await call.message.answer("✅ Obuna tasdiqlandi! Rolingizni tanlang:", reply_markup=role_keyboard)
         await state.set_state(UserRoleState.choosing_role)
@@ -187,401 +171,291 @@ async def check_sub_callback(call: types.CallbackQuery, state: FSMContext):
         await call.answer("❌ Hali hamma kanallarga qo'shilmadingiz!", show_alert=True)
 
 @dp1.callback_query(F.data == "role_driver")
-async def role_driver_chosen(call: types.CallbackQuery, state: FSMContext):
+async def role_driver(call: types.CallbackQuery, state: FSMContext):
     await call.answer()
-    await call.message.edit_text("👤 Ism-sharifingizni to'liq yuboring:")
+    await call.message.edit_text("👤 Ism-sharifingizni kiriting:")
     await state.set_state(UserRoleState.driver_get_name)
 
 @dp1.message(UserRoleState.driver_get_name, F.text)
-async def driver_get_name_handler(message: types.Message, state: FSMContext):
-    await state.update_data(driver_name=message.text.strip())
-    await message.answer("🚛 Mashinangizning nomini yozing (masalan: Cobalt, Damas, MAN):")
+async def driver_name(message: types.Message, state: FSMContext):
+    await state.update_data(d_name=message.text.strip())
+    await message.answer("🚛 Mashinangiz nomini kiriting (masalan: Cobalt, Damas, MAN):")
     await state.set_state(UserRoleState.driver_get_car)
 
 @dp1.message(UserRoleState.driver_get_car, F.text)
-async def driver_get_car_handler(message: types.Message, state: FSMContext):
+async def driver_car(message: types.Message, state: FSMContext):
     car = message.text.strip()
     data = await state.get_data()
-    user_id = message.from_user.id
-    drivers_db[user_id] = {"name": data.get("driver_name"), "car": car, "username": message.from_user.username, "phone": "Telegram"}
+    drivers_db[message.from_user.id] = {"name": data.get("d_name"), "car": car, "username": message.from_user.username or "yoq"}
     save_json(DRIVERS_FILE, drivers_db)
-    await message.answer(f"✅ Muvaffaqiyatli ro'yxatdan o'tdingiz!\nIsm: {data.get('driver_name')}\nMashina: {car}")
+    await message.answer("✅ Haydovchi sifatida ro'yxatdan o'tdingiz! /start ni bosing.")
     await state.clear()
 
 @dp1.callback_query(F.data == "role_curator")
-async def role_curator_chosen(call: types.CallbackQuery, state: FSMContext):
+async def role_curator(call: types.CallbackQuery, state: FSMContext):
     await call.answer()
-    await call.message.edit_text("👤 Ism-sharifingizni yuboring:")
+    await call.message.edit_text("👤 Kuratorning to'liqism-sharifini kiriting:")
     await state.set_state(UserRoleState.curator_get_name)
 
 @dp1.message(UserRoleState.curator_get_name, F.text)
-async def curator_get_name_handler(message: types.Message, state: FSMContext):
-    name = message.text.strip()
-    user_id = message.from_user.id
-    curators_db[user_id] = {"name": name, "username": message.from_user.username, "phone": "Telegram"}
+async def curator_name(message: types.Message, state: FSMContext):
+    await state.update_data(c_name=message.text.strip())
+    await message.answer("📞 Telefon raqamingizni kiriting (masalan: +998901234567):")
+    await state.set_state(UserRoleState.curator_get_phone)
+
+@dp1.message(UserRoleState.curator_get_phone, F.text)
+async def curator_phone(message: types.Message, state: FSMContext):
+    phone = message.text.strip()
+    data = await state.get_data()
+    curators_db[message.from_user.id] = {"name": data.get("c_name"), "phone": phone, "username": message.from_user.username or "yoq"}
     save_json(CURATORS_FILE, curators_db)
-    choice_kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="✍️ Qo'lda kiritish", callback_data="load_manual")],
-        [InlineKeyboardButton(text="⚡️ Tayyor e'lon tashlash", callback_data="load_ready")]
-    ])
-    await message.answer(f"✅ Xush kelibsiz, kurator <b>{name}</b>!\nUsulni tanlang:", reply_markup=choice_kb)
-    await state.set_state(UserRoleState.curator_choice_type)
+    await message.answer("✅ Kurator muvaffaqiyatli ro'yxatdan o'tdi! /start bosing.")
+    await state.clear()
 
-@dp1.callback_query(F.data == "load_manual")
-async def load_manual_start(call: types.CallbackQuery, state: FSMContext):
+@dp1.callback_query(F.data == "curator_new_load")
+async def curator_new_load(call: types.CallbackQuery, state: FSMContext):
     await call.answer()
-    await call.message.edit_text("📍 Yuk qayerdan jo'naydi?")
-    await state.set_state(UserRoleState.load_from)
+    await call.message.edit_text("📝 Yuk e'lonining matnini to'liq yuboring (Qayerdan, qayerga, vazni va hokazo):")
+    await state.set_state(UserRoleState.load_text)
 
-@dp1.message(UserRoleState.load_from, F.text)
-async def load_from_handler(message: types.Message, state: FSMContext):
-    await state.update_data(load_from=message.text.strip())
-    await message.answer("🎯 Yuk qayerga boradi?")
-    await state.set_state(UserRoleState.load_to)
-
-@dp1.message(UserRoleState.load_to, F.text)
-async def load_to_handler(message: types.Message, state: FSMContext):
-    await state.update_data(load_to=message.text.strip())
-    await message.answer("⚖ Mashina turi va yuk vazni qancha?")
-    await state.set_state(UserRoleState.load_weight)
-
-@dp1.message(UserRoleState.load_weight, F.text)
-async def load_weight_handler(message: types.Message, state: FSMContext):
-    await state.update_data(load_weight=message.text.strip())
-    await message.answer("📝 Qo'shimcha ma'lumot bering:")
-    await state.set_state(UserRoleState.load_info)
-
-@dp1.message(UserRoleState.load_info, F.text)
-async def load_info_handler(message: types.Message, state: FSMContext):
-    await state.update_data(load_info=message.text.strip())
-    urgency_kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🔥 Shoshilinch", callback_data="urgency_yes")],
-        [InlineKeyboardButton(text="⏳ Shoshilinch emas", callback_data="urgency_no")]
-    ])
-    await message.answer("⚡️ Qanchalik tez kerak?", reply_markup=urgency_kb)
-    await state.set_state(UserRoleState.load_urgency)
-
-@dp1.callback_query(F.data.startswith("urgency_"))
-async def load_urgency_handler(call: types.CallbackQuery, state: FSMContext):
-    await call.answer()
-    urgency = "Shoshilinch 🔥" if call.data == "urgency_yes" else "Shoshilinch emas ⏳"
-    await state.update_data(load_urgency=urgency)
-    await call.message.edit_text("⏳ Necha kundan keyin o'chirilsin? (Faqat raqam):")
-    await state.set_state(UserRoleState.load_days)
-
-@dp1.message(UserRoleState.load_days, F.text)
-async def load_days_handler(message: types.Message, state: FSMContext):
-    if not message.text.strip().isdigit():
-        await message.answer("❌ Faqat raqam kiriting:")
-        return
-    await state.update_data(load_days=int(message.text.strip()))
-    await finalize_and_send_load(message, state, await state.get_data())
-
-@dp1.callback_query(F.data == "load_ready")
-async def load_ready_start(call: types.CallbackQuery, state: FSMContext):
-    await call.answer()
-    await call.message.edit_text("📝 Tayyor yuk matnini yuboring:")
-    await state.set_state(UserRoleState.load_ready_text)
-
-@dp1.message(UserRoleState.load_ready_text, F.text)
-async def load_ready_text_handler(message: types.Message, state: FSMContext):
-    await state.update_data(load_ready_text=message.text.strip(), load_days=1, load_urgency="Tayyor e'lon")
-    await finalize_and_send_load(message, state, await state.get_data())
-
-async def finalize_and_send_load(message: types.Message, state: FSMContext, data: dict):
-    global load_counter
-    load_counter += 1
-    load_id = load_counter
+@dp1.message(UserRoleState.load_text, F.text)
+async def load_text_save(message: types.Message, state: FSMContext):
+    load_id = random.randint(1000, 9999) # Random ID
     user = message.from_user
-    curator_info = curators_db.get(user.id, {"name": user.full_name})
-
-    if "load_ready_text" in data:
-        main_content = data["load_ready_text"]
-    else:
-        main_content = (
-            f"📍 <b>Qayerdan:</b> {data.get('load_from')}\n"
-            f"🎯 <b>Qayerga:</b> {data.get('load_to')}\n"
-            f"⚖️ <b>Mashina / Vazni:</b> {data.get('load_weight')}\n"
-            f"📌 <b>Ma'lumot:</b> {data.get('load_info')}\n"
-            f"⚡️ <b>Holati:</b> {data.get('load_urgency')}"
-        )
-        
-    final_caption = (
-        f"📦 <b>YUK E'LONI №{load_id}</b>\n\n"
-        f"{main_content}\n\n"
-        f"_____________________\n"
-        f"👤 <b>Kurator:</b> {curator_info['name']} (@{user.username or 'yoq'})\n"
-        f"📢 <b>Kanallar:</b> @YukchiForwarder"
+    curator = curators_db.get(user.id, {"name": user.full_name, "phone": "Mavjud emas"})
+    
+    load_content = message.text.strip()
+    
+    # Guruhga tashlanadigan matn (Nomeri yashirin, faqat ID va ma'lumot)
+    group_text = (
+        f"📦 <b>YUK E'LONI (ID: #{load_id})</b>\n\n"
+        f"{load_content}\n\n"
+        f"──────────────────\n"
+        f"👤 <b>Kurator:</b> {curator['name']}\n"
+        f"🆔 <b>Yuk ID raqami:</b> <code>{load_id}</code>\n"
+        f"📢 <b>Kanal:</b> @YukchiForwarder\n"
+        f"🌐 <b>Support:</b> {SUPPORT_SITE_URL}"
     )
     
-    expire_time = datetime.now() + timedelta(days=data.get("load_days", 1))
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="📞 Nomer ko'rish", callback_data=f"show_curator_phone:{user.id}")],
-        [InlineKeyboardButton(text="🚛 Qabul qilish", callback_data=f"accept_load:{load_id}")],
+    kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🌐 Support Sayt", url=SUPPORT_SITE_URL)]
     ])
     
-    group_msg_ids = {}
-    for group_id in TARGET_GROUPS:
+    for g in TARGET_GROUPS:
         try:
-            sent_msg = await bot1.send_message(chat_id=group_id, text=final_caption, reply_markup=keyboard)
-            group_msg_ids[group_id] = sent_msg.message_id
-        except Exception:
+            await bot1.send_message(chat_id=g, text=group_text, reply_markup=kb)
+        except:
             pass
-          
-    active_loads[load_id] = {"user_id": user.id, "group_msg_ids": group_msg_ids, "expire_time": expire_time.isoformat()}
+            
+    active_loads[load_id] = {
+        "user_id": user.id,
+        "curator_name": curator["name"],
+        "curator_phone": curator["phone"],
+        "text": load_content,
+        "status": "faol",
+        "driver_id": None
+    }
     save_json(LOADS_FILE, active_loads)
-    await message.answer("✅ Yuk guruhlarga va adminga yuborildi!")
+    await message.answer(f"✅ Yukingiz guruhlarga muvaffaqiyatli tarqatildi!\n🆔 <b>Yuk ID raqami:</b> #{load_id}")
     await state.clear()
 
-@dp1.callback_query(F.data.startswith("show_curator_phone:"))
-async def show_curator_phone(call: types.CallbackQuery):
+@dp1.callback_query(F.data == "driver_accept_menu")
+async def driver_accept_menu(call: types.CallbackQuery, state: FSMContext):
     await call.answer()
-    try:
-        curator_id = int(call.data.split(":")[1])
-        curator = curators_db.get(curator_id, {"phone": "Mavjud emas"})
-        await call.answer(f"📞 Kurator raqami: {curator['phone']}", show_alert=True)
-    except Exception:
-        await call.answer("❌ Xatolik!", show_alert=True)
+    await call.message.answer("📥 Qabul qilmoqchi bo'lgan yukning <b>ID raqamini</b> yuboring (masalan: 4821):")
+    await state.set_state(UserRoleState.accept_load_id)
 
-@dp1.callback_query(F.data.startswith("accept_load:"))
-async def accept_load_handler(call: types.CallbackQuery):
-    await call.answer()
-    try:
-        load_id = int(call.data.split(":")[1])
-        load = active_loads.get(load_id)
-        if not load:
-            await call.answer("❌ Bu yuk topilmadi!", show_alert=True)
-            return
-        if call.from_user.id == load["user_id"]:
-            await call.answer("❌ O'zingizning e'loningizni qabul qila olmaysiz!", show_alert=True)
-            return
-        driver = drivers_db.get(call.from_user.id)
-        if not driver:
-            await call.answer("❌ Siz haydovchi emassiz! /start bosing.", show_alert=True)
-            return
-        try:
-            await bot1.send_message(chat_id=load["user_id"], text=f"✅ <b>Haydovchi yukni qabul qildi!</b>\nIsm: {driver['name']}\nMashina: {driver['car']}")
-        except Exception:
-            pass
-        await call.answer("✅ Kuratorga ma'lumotingiz yuborildi!", show_alert=True)
-    except Exception:
-        await call.answer("❌ Xatolik!", show_alert=True)
-
-# ================= 2-BOT HANDLERS =================
-def get_complaint_keyboard(is_admin: bool = False):
-    buttons = [
-        [InlineKeyboardButton(text="⚠️ Shikoyat qilish", callback_data="comp_shikoyat")],
-        [InlineKeyboardButton(text="❓ Muammo bildirish", callback_data="comp_muammo")],
-        [InlineKeyboardButton(text="🌐 Support Sayt", url=SUPPORT_SITE_URL)],
-        [InlineKeyboardButton(text="📢 E'lonchi Botga o'tish", url=f"https://t.me/{ELONCHI_BOT_USERNAME}")]
-    ]
-    if is_admin:
-        buttons.insert(0, [InlineKeyboardButton(text="⚙️ Admin Panel", callback_data="admin_panel_open")])
-    return InlineKeyboardMarkup(inline_keyboard=buttons)
-
-@dp2.message(F.text == "/start")
-async def start_cmd_bot2(message: types.Message, state: FSMContext):
-    await state.clear()
-    user_id = message.from_user.id
-    await track_user_activity(message.from_user, "@YukchiForwarderorg_Bot")
-    if user_id in banned_users:
-        await message.answer("⛔️ Siz bloklangansiz!")
+@dp1.message(UserRoleState.accept_load_id, F.text)
+async def driver_accept_process(message: types.Message, state: FSMContext):
+    txt = message.text.strip().replace("#", "")
+    if not txt.isdigit():
+        await message.answer("❌ Faqat raqamli ID kiriting:")
         return
-    is_admin = user_id in ADMINS
-    if is_admin:
-        await message.answer("👨‍💻 <b>Admin Paneli:</b>", reply_markup=get_admin_keyboard())
-    await message.answer("🛡 <b>Nazoratchi va Shikoyat Boti</b>", reply_markup=get_complaint_keyboard(is_admin))
+    load_id = int(txt)
+    load = active_loads.get(load_id)
+    if not load or load["status"] != "faol":
+        await message.answer("❌ Bunday faol yuk topilmadi yoki allaqachon olingan!")
+        await state.clear()
+        return
+        
+    driver = drivers_db.get(message.from_user.id)
+    load["status"] = "olingan"
+    load["driver_id"] = message.from_user.id
+    save_json(LOADS_FILE, active_loads)
+    
+    # Kuratorga haydovchi haqida xabar berish (Nomeri bilan)
+    try:
+        await bot1.send_message(
+            chat_id=load["user_id"],
+            text=(
+                f"✅ <b>Yukingizni haydovchi qabul qildi!</b>\n\n"
+                f"🚛 <b>Haydovchi:</b> {driver['name']}\n"
+                f"🚗 <b>Mashina:</b> {driver['car']}\n"
+                f"📞 <b>Aloqa:</b> @{driver['username']}"
+            )
+        )
+    except:
+        pass
+        
+    await message.answer(
+        f"✅ Siz #{load_id} raqamli yukni muvaffaqiyatli qabul qildingiz!\n\n"
+        f"📦 <b>Ma'lumot:</b> {load['text']}\n"
+        f"📞 <b>Kurator raqami:</b> {load['curator_phone']}"
+    )
+    await state.clear()
 
-@dp2.callback_query(F.data == "admin_panel_open")
-async def bot2_open_admin_panel(call: types.CallbackQuery):
+@dp1.callback_query(F.data == "driver_cancel_menu")
+async def driver_cancel_menu(call: types.CallbackQuery, state: FSMContext):
     await call.answer()
-    if call.from_user.id in ADMINS:
-        await call.message.answer("👨‍💻 Boshqaruv:", reply_markup=get_admin_keyboard())
+    await call.message.answer("❌ Bekor qilmoqchi bo'lgan yukingizning <b>ID raqamini</b> yuboring:")
+    await state.set_state(UserRoleState.accept_load_id) # soddalik uchun shu holat ishlatiladi
+
+# ================= 2-BOT HANDLERS (@YukchiForwarderorg_Bot - Shikoyat va himoya) =================
+@dp2.message(F.text == "/start")
+async def start_bot2(message: types.Message, state: FSMContext):
+    await state.clear()
+    await track_user_activity(message.from_user, "@YukchiForwarderorg_Bot")
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="⚠️ Shikoyat qilish", callback_data="comp_shikoyat"), InlineKeyboardButton(text="❓ Muammo bildirish", callback_data="comp_muammo")],
+        [InlineKeyboardButton(text="🌐 Support Sayt", url=SUPPORT_SITE_URL)]
+    ])
+    await message.answer("🛡 <b>Nazoratchi va Shikoyat Boti</b>", reply_markup=kb)
 
 @dp2.callback_query(F.data.in_({"comp_shikoyat", "comp_muammo"}))
-async def complaint_type_chosen(call: types.CallbackQuery, state: FSMContext):
+async def comp_type(call: types.CallbackQuery, state: FSMContext):
     await call.answer()
-    c_type = "Shikoyat" if call.data == "comp_shikoyat" else "Muammo"
-    await state.update_data(complaint_type=c_type)
-    await call.message.answer(f"📝 Iltimos, {c_type.lower()}ingiz matni yoki rasmini yuboring:")
+    await state.update_data(c_type="Shikoyat" if call.data == "comp_shikoyat" else "Muammo")
+    await call.message.answer("📝 Matnni yuboring:")
     await state.set_state(ComplaintState.waiting_for_complaint_text)
 
 @dp2.message(ComplaintState.waiting_for_complaint_text)
-async def process_complaint_text(message: types.Message, state: FSMContext):
+async def comp_send(message: types.Message, state: FSMContext):
     data = await state.get_data()
-    c_type = data.get("complaint_type", "Murojaat")
-    user = message.from_user
-    user_info = f"👤 <b>Kimdan:</b> {user.full_name} (@{user.username or 'yoq'}, ID: <code>{user.id}</code>)\n📌 <b>Turi:</b> {c_type}"
-    for admin_id in ADMINS:
+    for admin in ADMINS:
         try:
-            if message.photo:
-                await bot2.send_photo(chat_id=admin_id, photo=message.photo[-1].file_id, caption=f"{user_info}\n\n💬 {message.caption or ''}")
-            else:
-                await bot2.send_message(chat_id=admin_id, text=f"{user_info}\n\n💬 {message.text}")
-        except Exception:
-            pass
-    await message.answer(f"✅ {c_type} adminga yuborildi!")
+            await bot2.send_message(chat_id=admin, text=f"🚨 <b>{data.get('c_type')}</b>\nKimdan: {message.from_user.full_name}\nMatn: {message.text}")
+        except: pass
+    await message.answer("✅ Adminga yuborildi!")
     await state.clear()
 
-@dp2.message(lambda message: message.chat.id in TARGET_GROUPS)
-async def security_group_guard(message: types.Message):
-    if message.from_user.id in ADMINS: 
-        return
+# Guruhlardagi Xakerlar va Reklamalardan To'liq Himoya (Antispam)
+@dp2.message(lambda m: m.chat.id in TARGET_GROUPS)
+async def group_guard(message: types.Message):
+    if message.from_user.id in ADMINS: return
     text = (message.text or message.caption or "").lower()
     if any(w in text for w in SPAM_WORDS) or bool(re.search(LINK_REGEX, text)):
         try:
             await message.delete()
-            for group_id in TARGET_GROUPS:
-                await bot2.ban_chat_member(chat_id=group_id, user_id=message.from_user.id)
+            await bot2.ban_chat_member(chat_id=message.chat.id, user_id=message.from_user.id)
             banned_users[message.from_user.id] = message.from_user.full_name
             save_json(BANNED_FILE, banned_users)
-        except Exception:
-            pass
+        except: pass
 
-# ================= ADMIN ACTIONS =================
-async def admin_list_drivers_handler(call: types.CallbackQuery):
-    await call.answer()
+# ================= ADMIN HANDLERLAR =================
+async def admin_list_drivers(call: types.CallbackQuery):
     if call.from_user.id not in ADMINS: return
     txt = "\n".join([f"👤 {d['name']} | 🚛 {d['car']}" for d in drivers_db.values()]) or "Haydovchilar yo'q"
-    await call.message.answer(f"🚛 <b>Haydovchilar:</b>\n\n{txt}")
+    await call.message.answer(f"🚛 <b>Haydovchilar ro'yxati:</b>\n\n{txt}")
 
-async def admin_list_curators_handler(call: types.CallbackQuery):
-    await call.answer()
+async def admin_list_curators(call: types.CallbackQuery):
     if call.from_user.id not in ADMINS: return
-    txt = "\n".join([f"👤 {c['name']}" for c in curators_db.values()]) or "Kuratorlar yo'q"
-    await call.message.answer(f"📦 <b>Kuratorlar:</b>\n\n{txt}")
+    txt = "\n".join([f"👤 {c['name']} | 📞 {c['phone']}" for c in curators_db.values()]) or "Kuratorlar yo'q"
+    await call.message.answer(f"📦 <b>Kuratorlar ro'yxati:</b>\n\n{txt}")
 
-async def admin_stats_handler(call: types.CallbackQuery):
-    await call.answer()
+async def admin_stats(call: types.CallbackQuery):
     if call.from_user.id not in ADMINS: return
-    stats_text = (
-        f"📊 <b>Statistika:</b>\n\n"
-        f"👥 Foydalanuvchilar: {len(user_stats)} ta\n"
-        f"🚛 Haydovchilar: {len(drivers_db)} ta\n"
-        f"📦 Kuratorlar: {len(curators_db)} ta\n"
-        f"📌 Faol yuklar: {len(active_loads)} ta\n"
-        f"🚫 Bloklanganlar: {len(banned_users)} ta"
-    )
-    await call.message.answer(stats_text)
+    await call.message.answer(f"📊 Statistika:\n👥 Foydalanuvchilar: {len(user_stats)}\n🚛 Haydovchilar: {len(drivers_db)}\n📦 Kuratorlar: {len(curators_db)}")
 
-async def handle_broadcast_start(call: types.CallbackQuery, state: FSMContext):
-    await call.answer()
+async def broadcast_start(call: types.CallbackQuery, state: FSMContext):
     if call.from_user.id not in ADMINS: return
-    await call.message.answer("📢 <b>Reklama matni yoki rasmini yuboring:</b>")
+    await call.message.answer("📢 Reklama matnini yuboring:")
     await state.set_state(AdminState.waiting_for_broadcast)
 
-async def handle_broadcast_process(message: types.Message, state: FSMContext):
+async def broadcast_process(message: types.Message, state: FSMContext):
     if message.from_user.id not in ADMINS: return
-    sent_count = 0
-    for g in TARGET_GROUPS:
-        try: 
-            await message.copy_to(chat_id=g)
-            sent_count += 1
-        except: 
-            pass
+    count = 0
     for uid in user_stats.keys():
-        if isinstance(uid, int):
-            try:
-                await message.copy_to(chat_id=uid)
-                sent_count += 1
-            except: 
-                pass
-    await message.answer(f"✅ Tarqatildi! (Jami: {sent_count} ta)")
+        try:
+            await message.copy_to(chat_id=int(uid))
+            count += 1
+        except: pass
+    await message.answer(f"✅ Reklama {count} ta foydalanuvchiga tarqatildi!")
     await state.clear()
 
-async def handle_ban_start(call: types.CallbackQuery, state: FSMContext):
-    await call.answer()
+async def ban_start(call: types.CallbackQuery, state: FSMContext):
     if call.from_user.id not in ADMINS: return
-    await call.message.answer("🚫 Ban qilinuvchi ID raqamini kiriting:")
+    await call.message.answer("🚫 Ban qilinadigan user ID:")
     await state.set_state(AdminState.waiting_for_ban_target)
 
-async def handle_ban_process(message: types.Message, state: FSMContext):
-    if message.from_user.id not in ADMINS: return
-    target = message.text.strip()
-    key = int(target) if target.isdigit() else target
-    banned_users[key] = target
-    save_json(BANNED_FILE, banned_users)
-    await message.answer(f"✅ {target} ban qilindi!")
+async def ban_process(message: types.Message, state: FSMContext):
+    if call_id := message.text.strip().isdigit():
+        uid = int(message.text.strip())
+        banned_users[uid] = "Blocked"
+        save_json(BANNED_FILE, banned_users)
+        await message.answer("✅ Ban qilindi!")
     await state.clear()
 
-async def handle_unban_start(call: types.CallbackQuery, state: FSMContext):
-    await call.answer()
+async def unban_start(call: types.CallbackQuery, state: FSMContext):
     if call.from_user.id not in ADMINS: return
-    await call.message.answer("✅ Bandan chiqarish uchun ID raqamini yuboring:")
+    await call.message.answer("✅ Bandan chiqarish uchun ID:")
     await state.set_state(AdminState.waiting_for_unban_target)
 
-async def handle_unban_process(message: types.Message, state: FSMContext):
-    if message.from_user.id not in ADMINS: return
-    target = message.text.strip()
-    key = int(target) if target.isdigit() else target
-    if key in banned_users: 
-        del banned_users[key]
+async def unban_process(message: types.Message, state: FSMContext):
+    if message.text.strip().isdigit():
+        uid = int(message.text.strip())
+        if uid in banned_users: del banned_users[uid]
         save_json(BANNED_FILE, banned_users)
-    await message.answer(f"✅ {target} bandan chiqarildi!")
+        await message.answer("✅ Bandan chiqarildi!")
     await state.clear()
 
 for dp_inst in [dp1, dp2]:
     @dp_inst.callback_query(F.data == "admin_list_drivers")
-    async def ald(c: types.CallbackQuery): await admin_list_drivers_handler(c)
+    async def ald(c: types.CallbackQuery): await admin_list_drivers(c)
     @dp_inst.callback_query(F.data == "admin_list_curators")
-    async def alc(c: types.CallbackQuery): await admin_list_curators_handler(c)
+    async def alc(c: types.CallbackQuery): await admin_list_curators(c)
     @dp_inst.callback_query(F.data == "admin_stats")
-    async def als(c: types.CallbackQuery): await admin_stats_handler(c)
+    async def als(c: types.CallbackQuery): await admin_stats(c)
     @dp_inst.callback_query(F.data == "admin_broadcast")
-    async def bc_s(c: types.CallbackQuery, s: FSMContext): await handle_broadcast_start(c, s)
+    async def bcs(c: types.CallbackQuery, s: FSMContext): await broadcast_start(c, s)
     @dp_inst.message(AdminState.waiting_for_broadcast)
-    async def bc_p(m: types.Message, s: FSMContext): await handle_broadcast_process(m, s)
+    async def bcp(m: types.Message, s: FSMContext): await broadcast_process(m, s)
     @dp_inst.callback_query(F.data == "admin_ban_user")
-    async def bn_s(c: types.CallbackQuery, s: FSMContext): await handle_ban_start(c, s)
-    @dp_inst.message(AdminState.waiting_for_ban_target, F.text)
-    async def bn_p(m: types.Message, s: FSMContext): await handle_ban_process(m, s)
+    async def bns(c: types.CallbackQuery, s: FSMContext): await ban_start(c, s)
+    @dp_inst.message(AdminState.waiting_for_ban_target)
+    async def bnp(m: types.Message, s: FSMContext): await ban_process(m, s)
     @dp_inst.callback_query(F.data == "admin_unban_user")
-    async def ubn_s(c: types.CallbackQuery, s: FSMContext): await handle_unban_start(c, s)
-    @dp_inst.message(AdminState.waiting_for_unban_target, F.text)
-    async def ubn_p(m: types.Message, s: FSMContext): await handle_unban_process(m, s)
+    async def ubs(c: types.CallbackQuery, s: FSMContext): await unban_start(c, s)
+    @dp_inst.message(AdminState.waiting_for_unban_target)
+    async def ubp(m: types.Message, s: FSMContext): await unban_process(m, s)
 
-# ================= FASTAPI LIFESPAN =================
+# ================= FASTAPI WEBHOOKS =================
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     yield
 
 app = FastAPI(lifespan=lifespan)
 
-async def process_update_safely(bot, dp, data):
+async def process_update(bot, dp, data):
     try:
-        # aiogram 3.13.1 uchun mos keluvchi Update validatsiyasi
         update = Update.model_validate(data, context={"bot": bot})
         await dp.feed_update(bot, update)
     except Exception as e:
-        logging.error(f"Update xatoligi: {e}")
+        logging.error(f"Xato: {e}")
 
 @app.post("/webhook/{token}")
-async def unified_webhook(token: str, request: Request, background_tasks: BackgroundTasks):
-    try:
-        data = await request.json()
-        if token == API_TOKEN_1:
-            background_tasks.add_task(process_update_safely, bot1, dp1, data)
-        elif token == API_TOKEN_2:
-            background_tasks.add_task(process_update_safely, bot2, dp2, data)
-        else:
-            return {"status": "error", "message": "Invalid token"}
-        return {"status": "ok"}
-    except Exception as e:
-        return {"status": "error", "message": str(e)}
+async def webhook_handler(token: str, request: Request, bg: BackgroundTasks):
+    data = await request.json()
+    if token == API_TOKEN_1:
+        bg.add_task(process_update, bot1, dp1, data)
+    elif token == API_TOKEN_2:
+        bg.add_task(process_update, bot2, dp2, data)
+    else:
+        return {"status": "error"}
+    return {"status": "ok"}
 
 @app.get("/")
 async def root(request: Request):
     base_url = str(request.base_url).rstrip("/")
-    url1 = f"{base_url}/webhook/{API_TOKEN_1}"
-    url2 = f"{base_url}/webhook/{API_TOKEN_2}"
-    try:
-        await bot1.set_webhook(url1)
-        await bot2.set_webhook(url2)
-    except Exception:
-        pass
-    return {
-        "status": "Botlar muvaffaqiyatli ishga tushdi va webhooklar ulandi!",
-        "bot1_webhook": url1,
-        "bot2_webhook": url2
-    }
+    await bot1.set_webhook(f"{base_url}/webhook/{API_TOKEN_1}")
+    await bot2.set_webhook(f"{base_url}/webhook/{API_TOKEN_2}")
+    return {"status": "Botlar muvaffaqiyatli ishga tushdi va ulandi!"}
