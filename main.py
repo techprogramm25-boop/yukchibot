@@ -396,15 +396,22 @@ async def show_curator_phone(call: types.CallbackQuery):
 async def accept_load_handler(call: types.CallbackQuery):
     await call.answer()
     try:
-        driver = drivers_db.get(call.from_user.id)
-        if not driver:
-            await call.answer("❌ Siz haydovchi emassiz! /start orqali ro'yxatdan o'ting.", show_alert=True)
-            return
         load_id = int(call.data.split(":")[1])
         load = active_loads.get(load_id)
         if not load:
             await call.answer("❌ Bu yuk topilmadi!", show_alert=True)
             return
+            
+        # Kurator o'zining e'lonini o'zi qabul qilishiga yo'l qo'ymaslik
+        if call.from_user.id == load["user_id"]:
+            await call.answer("❌ O'zingizning e'loningizni o'zingiz qabul qila olmaysiz!", show_alert=True)
+            return
+
+        driver = drivers_db.get(call.from_user.id)
+        if not driver:
+            await call.answer("❌ Siz haydovchi emassiz! /start orqali ro'yxatdan o'ting.", show_alert=True)
+            return
+
         try:
             await bot1.send_message(chat_id=load["user_id"], text=f"✅ <b>Haydovchi yukni qabul qildi!</b>\nIsm: {driver['name']}\nMashina: {driver['car']}")
         except Exception:
